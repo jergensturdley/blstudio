@@ -248,6 +248,7 @@ final class GenerateModel {
                 var sub = req
                 if let seed { sub.seed = seed + index }
                 group.addTask { [weak self] in
+                    let me = self
                     let result = try await client.imageGenerate(
                         sub, outDir: outDir,
                         outPrefix: "\(basePrefix)-\(index + 1)",
@@ -255,8 +256,8 @@ final class GenerateModel {
                         pollInterval: pollInterval,
                         timeoutSeconds: timeoutSeconds,
                         onProgress: { line in
-                            Task { @MainActor [weak self] in
-                                self?.progressLine = "Image \(index + 1)/\(count) — \(line)"
+                            Task { @MainActor in
+                                me?.progressLine = "Image \(index + 1)/\(count) — \(line)"
                             }
                         })
                     return (index, result)
@@ -422,6 +423,7 @@ final class EditModel {
                 var sub = req
                 if let seed { sub.seed = seed + index }
                 group.addTask { [weak self] in
+                    let me = self
                     let result = try await client.imageEdit(
                         sub, outDir: outDir,
                         outPrefix: "\(basePrefix)-\(index + 1)",
@@ -429,8 +431,8 @@ final class EditModel {
                         pollInterval: pollInterval,
                         timeoutSeconds: timeoutSeconds,
                         onProgress: { line in
-                            Task { @MainActor [weak self] in
-                                self?.progressLine = "Image \(index + 1)/\(count) — \(line)"
+                            Task { @MainActor in
+                                me?.progressLine = "Image \(index + 1)/\(count) — \(line)"
                             }
                         })
                     return (index, result)

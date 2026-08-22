@@ -1,5 +1,45 @@
+# ── Swift / SwiftPM ────────────────────────────────────────────────
 .build/
-dist/
-.DS_Store
-*.xcodeproj
 .swiftpm/
+Packages/
+Package.pins
+Package.resolved
+*.xcodeproj
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# ── Bundled / shipped artifacts (built by `make app`) ────────────
+dist/
+*.app
+*.icns
+icon_1024.png
+
+# ── Other tooling / editors ────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# ── Secrets & credentials — never commit ───────────────────────────
+# BlStudio stores API keys in the macOS Keychain, never on disk, but
+# guard against accidental commits of any exported material anyway.
+.env
+.env.*
+*.p12
+*.cer
+*.mobileprovision
+*.key
+*.pem
+secrets/
+credentials.json
+bailian-config.json

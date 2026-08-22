@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build & test (macOS 14, Swift 6)
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          swift --version
+          xcodebuild -version || true
+
+      - name: Build (release)
+        run: swift build -c release
+
+      - name: XCTest suite
+        # Integration tests auto-skip on runners without the bl CLI.
+        run: swift test
+
+      - name: Selftest (headless smoke tests)
+        run: .build/arm64-apple-macosx/release/BlStudio --selftest
+
+      - name: View probe (offscreen render of every pane)
+        # Needs a windowserver session; informational on headless runners.
+        run: .build/arm64-apple-macosx/release/BlStudio --viewprobe
+        continue-on-error: true

@@ -174,7 +174,7 @@ final class KeysStore {
             throw NSError(domain: "BlStudio", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "API key looks too short."])
         }
-        var meta = APIKeyMeta(label: label.isEmpty ? maskAPIKey(trimmed) : label,
+        let meta = APIKeyMeta(label: label.isEmpty ? maskAPIKey(trimmed) : label,
                               masked: maskAPIKey(trimmed))
         try Keychain.setSecret(trimmed, account: meta.id.uuidString)
         keys.append(meta)

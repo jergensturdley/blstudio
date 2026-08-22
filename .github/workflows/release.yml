@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build universal app & publish release
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build universal, bundle, ad-hoc sign, zip
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          make zip VERSION="${VERSION}"
+          mv dist/BlStudio-macos.zip "dist/BlStudio-${TAG}-macos-universal.zip"
+          ls -la dist/
+
+      - name: Verify the shipped binary still self-tests
+        run: |
+          .build/universal/BlStudio --selftest
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/BlStudio-*-macos-universal.zip
+          generate_release_notes: true
+          append_body: true
+          body: |
+            ## Install
+
+            1. Download `BlStudio-<tag>-macos-universal.zip` and unzip.
+            2. Drag **BlStudio.app** to `/Applications`.
+            3. The build is ad-hoc signed (no paid Apple Developer ID), so on first
+               launch macOS Gatekeeper will block a double-click: right-click →
+               **Open**, or run `xattr -dr com.apple.quarantine /Applications/BlStudio.app`.
+            4. BlStudio needs the `bl` CLI installed and authenticated
+               (`npm i -g bailian-cli && bl auth login`).

@@ -1,5 +1,8 @@
 # BlStudio
 
+[![CI](https://github.com/jergensturdley/blstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/jergensturdley/blstudio/actions/workflows/ci.yml)
+[![Release](https://github.com/jergensturdley/blstudio/actions/workflows/release.yml/badge.svg)](https://github.com/jergensturdley/blstudio/releases)
+
 A native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)) — Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps `bl` in a friendly GUI focused on:
 
 - **Image generation** — prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible.
@@ -27,6 +30,29 @@ You can also open `Package.swift` in Xcode and hit Run.
 
 > Sandboxed shells: SwiftPM's build sandbox may be unavailable; use
 > `make run SWIFT_FLAGS=--disable-sandbox` (already handled for CI-like environments).
+
+## Install a prebuilt release
+
+Grab the latest `BlStudio-<tag>-macos-universal.zip` from [GitHub Releases](https://github.com/jergensturdley/blstudio/releases), unzip, and drag **BlStudio.app** to `/Applications`. Builds are **universal** (Apple Silicon + Intel) and **ad-hoc signed** — there is no paid Apple Developer ID, so on first launch macOS Gatekeeper blocks a plain double-click. Either:
+
+- right-click → **Open**, or
+- `xattr -dr com.apple.quarantine /Applications/BlStudio.app`
+
+You still need the `bl` CLI installed and authenticated (see Requirements).
+
+## Releases & CI
+
+- **CI** (`.github/workflows/ci.yml`) runs on every push/PR to `main`: release build, the XCTest suite (live `bl` integration tests auto-skip where the CLI is absent), the headless `--selftest`, and an offscreen `--viewprobe` render of every pane.
+- **Release** (`.github/workflows/release.yml`) runs when you push a tag matching `v*`. It builds a universal binary, bundles `BlStudio.app`, ad-hoc signs it with the hardened runtime, zips it, and publishes a GitHub Release with install notes.
+
+Cut a release with:
+
+```sh
+git tag v1.2.0
+git push origin v1.2.0     # triggers the Release workflow
+```
+
+The version embedded in `Info.plist` is derived from the tag (`v1.2.0` → `1.2.0`).
 
 ## Using the app
 
