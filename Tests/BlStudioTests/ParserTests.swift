@@ -147,6 +147,19 @@ final class ParserTests: XCTestCase {
         XCTAssertEqual(maskAPIKey("short"), "•••••")
     }
 
+    // MARK: Seed parsing
+
+    func testParseSeed() throws {
+        XCTAssertNil(try parseSeed(enabled: false, text: "ignored"))
+        XCTAssertEqual(try parseSeed(enabled: true, text: "42"), 42)
+        XCTAssertEqual(try parseSeed(enabled: true, text: " 7 "), 7)
+        XCTAssertThrowsError(try parseSeed(enabled: true, text: ""))
+        XCTAssertThrowsError(try parseSeed(enabled: true, text: "12.5"))
+        XCTAssertThrowsError(try parseSeed(enabled: true, text: "-1"))
+        XCTAssertThrowsError(try parseSeed(enabled: true, text: "2147483648"))
+        XCTAssertEqual(try parseSeed(enabled: true, text: "2147483647"), 2_147_483_647)
+    }
+
     // MARK: Prefix generation
 
     @MainActor

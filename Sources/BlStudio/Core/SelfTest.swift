@@ -83,6 +83,21 @@ enum SelfTest {
         let prefix = AppState.outPrefix(for: "A cat in a spacesuit!", kind: "img")
         check("out prefix", prefix.hasPrefix("a-cat-in-"))
 
+        // 7b. Seed parsing/validation
+        do {
+            let off = try parseSeed(enabled: false, text: "")
+            let on = try parseSeed(enabled: true, text: "42")
+            check("seed parsing", off == nil && on == 42)
+        } catch {
+            check("seed parsing", false)
+        }
+        var badSeedRejected = false
+        do { _ = try parseSeed(enabled: true, text: "12.5") } catch { badSeedRejected = true }
+        check("seed validation rejects non-integer", badSeedRejected)
+        var emptySeedRejected = false
+        do { _ = try parseSeed(enabled: true, text: "  ") } catch { emptySeedRejected = true }
+        check("seed validation rejects empty", emptySeedRejected)
+
         // 8. Live integration (only if bl is installed): dry-run + auth status
         let client = BLClient()
         if let _ = try? client.resolveBinary() {

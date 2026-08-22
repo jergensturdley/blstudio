@@ -74,8 +74,28 @@ struct EditView: View {
                                 .frame(maxWidth: 300)
                         }
                         LabeledContent("Images") {
-                            Stepper("\(edit.count)", value: $edit.count, in: 1...6)
-                                .fixedSize()
+                            VStack(alignment: .leading, spacing: 2) {
+                                Stepper("\(edit.count)", value: $edit.count, in: 1...6)
+                                    .fixedSize()
+                                if edit.count > 1 {
+                                    Text("Runs \(edit.count) parallel single-image requests.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        LabeledContent("Seed") {
+                            HStack {
+                                Toggle("", isOn: $edit.seedEnabled).labelsHidden().toggleStyle(.switch)
+                                if edit.seedEnabled {
+                                    TextField("e.g. 42", text: $edit.seedText)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 130)
+                                    Text("0–2147483647")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                         LabeledContent("Negative prompt") {
                             TextField("things to avoid", text: $edit.negativePrompt)

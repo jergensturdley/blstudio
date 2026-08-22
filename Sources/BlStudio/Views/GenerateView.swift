@@ -97,16 +97,27 @@ struct GenerateView: View {
                             .frame(maxWidth: 420)
                         }
                         LabeledContent("Images") {
-                            Stepper("\(gen.count)", value: $gen.count, in: 1...6)
-                                .fixedSize()
+                            VStack(alignment: .leading, spacing: 2) {
+                                Stepper("\(gen.count)", value: $gen.count, in: 1...6)
+                                    .fixedSize()
+                                if gen.count > 1 {
+                                    Text("Runs \(gen.count) parallel single-image requests (works with every model).")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                         LabeledContent("Seed") {
                             HStack {
                                 Toggle("", isOn: $gen.seedEnabled).labelsHidden().toggleStyle(.switch)
                                 if gen.seedEnabled {
-                                    TextField("seed", value: $gen.seed, format: .number)
+                                    TextField("e.g. 42", text: $gen.seedText)
                                         .textFieldStyle(.roundedBorder)
-                                        .frame(width: 110)
+                                        .frame(width: 130)
+                                    Text("0–2147483647 · each extra image uses seed+1, seed+2…")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
                                 }
                             }
                         }

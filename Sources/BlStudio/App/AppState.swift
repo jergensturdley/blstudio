@@ -83,6 +83,24 @@ enum GenPhase: Equatable {
     case failed(String)
 }
 
+/// Validates and parses an optional seed field. Throws with a friendly message.
+/// Shared by the Generate and Edit panes.
+func parseSeed(enabled: Bool, text: String) throws -> Int? {
+    guard enabled else { return nil }
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !t.isEmpty else {
+        throw NSError(domain: "BlStudio", code: 2, userInfo: [
+            NSLocalizedDescriptionKey: "Seed is enabled but empty — enter a number or switch it off.",
+        ])
+    }
+    guard let v = Int(t), v >= 0, v <= 2_147_483_647 else {
+        throw NSError(domain: "BlStudio", code: 2, userInfo: [
+            NSLocalizedDescriptionKey: "Seed must be a whole number between 0 and 2147483647.",
+        ])
+    }
+    return v
+}
+
 @MainActor
 @Observable
 final class GenerateModel {
@@ -95,7 +113,7 @@ final class GenerateModel {
     var customSize: String = ""
     var count: Int = 1
     var seedEnabled = false
-    var seed: Int = 0
+    var seedText: String = ""
     var promptExtend: Bool? = nil
     var watermark: Bool? = nil
     var activePresets: Set<String> = []
@@ -138,6 +156,15 @@ final class GenerateModel {
 
     func generate() async {
         guard canRun else { return }
+
+        let seedValue: Int?
+        do {
+            seedValue = try parseSeed(enabled: seedEnabled, text: seedText)
+        } catch {
+            phase = .failed(error.localizedDescription)
+            return
+        }
+
         phase = .running
         progressLine = "Starting…"
         lastResult = nil
@@ -150,23 +177,31 @@ final class GenerateModel {
         var req = ImageGenRequest(prompt: composedPrompt)
         req.model = model.nonEmptyOrNil
         req.size = effectiveSize.nonEmptyOrNil
-        req.n = count
-        req.seed = seedEnabled ? seed : nil
+        req.n = 1
+        req.seed = seedValue
         req.negativePrompt = negativePrompt.nonEmptyOrNil
         req.promptExtend = promptExtend
         req.watermark = watermark
 
         let started = Date()
         do {
-            let result = try await app.client.imageGenerate(
-                req, outDir: outDir,
-                outPrefix: AppState.outPrefix(for: prompt, kind: "img"),
-                apiKey: app.activeSecret,
-                pollInterval: settings.pollInterval,
-                timeoutSeconds: settings.requestTimeout,
-                onProgress: { [weak self] line in
-                    Task { @MainActor in self?.progressLine = line }
-                })
+            let result: ImageGenerationResult
+            if count <= 1 {
+                result = try await app.client.imageGenerate(
+                    req, outDir: outDir,
+                    outPrefix: AppState.outPrefix(for: prompt, kind: "img"),
+                    apiKey: app.activeSecret,
+                    pollInterval: settings.pollInterval,
+                    timeoutSeconds: settings.requestTimeout,
+                    onProgress: { [weak self] line in
+                        Task { @MainActor in self?.progressLine = line }
+                    })
+            } else {
+                result = try await generateFanOut(
+                    req, count: count, seed: seedValue, outDir: outDir,
+                    pollInterval: settings.pollInterval,
+                    timeoutSeconds: settings.requestTimeout)
+            }
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             lastResult = result
             lastSavedPaths = result.saved
@@ -191,6 +226,66 @@ final class GenerateModel {
         }
     }
 
+    /// Several image models (incl. the default qwen-image-3.0) ignore the batch
+    /// parameter `n` and return a single image per request. To honor the requested
+    /// count anyway, run N parallel single-image requests — the same approach as
+    /// `bl image generate --concurrent N`. Seeds are offset per image so a fixed
+    /// seed still yields N distinct, reproducible results.
+    private func generateFanOut(
+        _ req: ImageGenRequest,
+        count: Int,
+        seed: Int?,
+        outDir: URL,
+        pollInterval: Int,
+        timeoutSeconds: Int
+    ) async throws -> ImageGenerationResult {
+        let basePrefix = AppState.outPrefix(for: prompt, kind: "img")
+        let apiKey = app.activeSecret
+        let client = app.client
+
+        return try await withThrowingTaskGroup(of: (Int, ImageGenerationResult).self) { group in
+            for index in 0..<count {
+                var sub = req
+                if let seed { sub.seed = seed + index }
+                group.addTask { [weak self] in
+                    let result = try await client.imageGenerate(
+                        sub, outDir: outDir,
+                        outPrefix: "\(basePrefix)-\(index + 1)",
+                        apiKey: apiKey,
+                        pollInterval: pollInterval,
+                        timeoutSeconds: timeoutSeconds,
+                        onProgress: { line in
+                            Task { @MainActor [weak self] in
+                                self?.progressLine = "Image \(index + 1)/\(count) — \(line)"
+                            }
+                        })
+                    return (index, result)
+                }
+            }
+
+            var collected: [(Int, ImageGenerationResult)] = []
+            for try await item in group {
+                collected.append(item)
+            }
+            collected.sort { $0.0 < $1.0 }
+
+            var saved: [String] = []
+            var urls: [String] = []
+            var taskIds: [String] = []
+            var total = 0
+            for (_, r) in collected {
+                saved.append(contentsOf: r.saved)
+                urls.append(contentsOf: r.urls)
+                total += r.total
+                if let t = r.task_id { taskIds.append(t) }
+                if let t = r.task_ids { taskIds.append(contentsOf: t) }
+            }
+            return ImageGenerationResult(urls: urls, saved: saved, total: total,
+                                         task_id: nil,
+                                         task_ids: taskIds.isEmpty ? nil : taskIds)
+        }
+    }
+
     private var composedPrompt: String {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -211,7 +306,7 @@ final class EditModel {
     var count: Int = 1
     var editFunction: String = ""
     var seedEnabled = false
-    var seed: Int = 0
+    var seedText: String = ""
 
     var phase: GenPhase = .idle
     var progressLine: String = ""
@@ -240,6 +335,15 @@ final class EditModel {
 
     func generate() async {
         guard canRun else { return }
+
+        let seedValue: Int?
+        do {
+            seedValue = try parseSeed(enabled: seedEnabled, text: seedText)
+        } catch {
+            phase = .failed(error.localizedDescription)
+            return
+        }
+
         phase = .running
         progressLine = "Starting…"
         lastSavedPaths = []
@@ -251,22 +355,30 @@ final class EditModel {
         var req = ImageEditRequest(sources: sources, prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines))
         req.model = model.nonEmptyOrNil
         req.size = size.nonEmptyOrNil
-        req.n = count
-        req.seed = seedEnabled ? seed : nil
+        req.n = 1
+        req.seed = seedValue
         req.negativePrompt = negativePrompt.nonEmptyOrNil
         req.function = editFunction.nonEmptyOrNil
 
         let started = Date()
         do {
-            let result = try await app.client.imageEdit(
-                req, outDir: outDir,
-                outPrefix: AppState.outPrefix(for: prompt, kind: "edit"),
-                apiKey: app.activeSecret,
-                pollInterval: settings.pollInterval,
-                timeoutSeconds: settings.requestTimeout,
-                onProgress: { [weak self] line in
-                    Task { @MainActor in self?.progressLine = line }
-                })
+            let result: ImageGenerationResult
+            if count <= 1 {
+                result = try await app.client.imageEdit(
+                    req, outDir: outDir,
+                    outPrefix: AppState.outPrefix(for: prompt, kind: "edit"),
+                    apiKey: app.activeSecret,
+                    pollInterval: settings.pollInterval,
+                    timeoutSeconds: settings.requestTimeout,
+                    onProgress: { [weak self] line in
+                        Task { @MainActor in self?.progressLine = line }
+                    })
+            } else {
+                result = try await editFanOut(
+                    req, count: count, seed: seedValue, outDir: outDir,
+                    pollInterval: settings.pollInterval,
+                    timeoutSeconds: settings.requestTimeout)
+            }
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             lastSavedPaths = result.saved
             phase = .done
@@ -288,6 +400,63 @@ final class EditModel {
                 keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
                 savedPaths: [], remoteUrls: [], taskId: nil,
                 durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    /// Same fan-out rationale as Generate: several image models return one image
+    /// per request regardless of `n`, so run N parallel single-image edit requests.
+    private func editFanOut(
+        _ req: ImageEditRequest,
+        count: Int,
+        seed: Int?,
+        outDir: URL,
+        pollInterval: Int,
+        timeoutSeconds: Int
+    ) async throws -> ImageGenerationResult {
+        let basePrefix = AppState.outPrefix(for: prompt, kind: "edit")
+        let apiKey = app.activeSecret
+        let client = app.client
+
+        return try await withThrowingTaskGroup(of: (Int, ImageGenerationResult).self) { group in
+            for index in 0..<count {
+                var sub = req
+                if let seed { sub.seed = seed + index }
+                group.addTask { [weak self] in
+                    let result = try await client.imageEdit(
+                        sub, outDir: outDir,
+                        outPrefix: "\(basePrefix)-\(index + 1)",
+                        apiKey: apiKey,
+                        pollInterval: pollInterval,
+                        timeoutSeconds: timeoutSeconds,
+                        onProgress: { line in
+                            Task { @MainActor [weak self] in
+                                self?.progressLine = "Image \(index + 1)/\(count) — \(line)"
+                            }
+                        })
+                    return (index, result)
+                }
+            }
+
+            var collected: [(Int, ImageGenerationResult)] = []
+            for try await item in group {
+                collected.append(item)
+            }
+            collected.sort { $0.0 < $1.0 }
+
+            var saved: [String] = []
+            var urls: [String] = []
+            var taskIds: [String] = []
+            var total = 0
+            for (_, r) in collected {
+                saved.append(contentsOf: r.saved)
+                urls.append(contentsOf: r.urls)
+                total += r.total
+                if let t = r.task_id { taskIds.append(t) }
+                if let t = r.task_ids { taskIds.append(contentsOf: t) }
+            }
+            return ImageGenerationResult(urls: urls, saved: saved, total: total,
+                                         task_id: nil,
+                                         task_ids: taskIds.isEmpty ? nil : taskIds)
         }
     }
 }

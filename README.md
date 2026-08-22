@@ -2,7 +2,7 @@
 
 A native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)) — Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps `bl` in a friendly GUI focused on:
 
-- **Image generation** — prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery.
+- **Image generation** — prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible.
 - **Image editing** — drop source images, describe the edit, get results back.
 - **Easy prompting** — saved favorite prompts, one-click style suffixes, quick chat with any Qwen text model (great for iterating on image prompts).
 - **Image receiving** — generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
