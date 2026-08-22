@@ -15,7 +15,7 @@ enum BLClientError: Error, LocalizedError {
         case .binaryNotFound(let searched):
             return "bl binary not found. Searched: \(searched.joined(separator: ", ")). Install bailian-cli or set the path in Settings."
         case .apiError(_, let message, let hint):
-            if let hint, !hint.isEmpty { return "\(message) — \(hint)" }
+            if let hint, !hint.isEmpty { return "\(message): \(hint)" }
             return message
         case .badOutput(let head):
             return "Could not parse bl output: \(head)"

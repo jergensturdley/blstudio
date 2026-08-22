@@ -114,15 +114,15 @@ struct KeysView: View {
                             }
                             GridRow {
                                 Text("Profile").foregroundStyle(.secondary)
-                                Text(auth.config ?? "—")
+                                Text(auth.config ?? "-")
                             }
                             GridRow {
                                 Text("API key").foregroundStyle(.secondary)
-                                Text(auth.api_key?.masked ?? "—")
+                                Text(auth.api_key?.masked ?? "-")
                             }
                             GridRow {
                                 Text("Base URL").foregroundStyle(.secondary)
-                                Text(auth.api_key?.base_url ?? "—").lineLimit(1).truncationMode(.middle)
+                                Text(auth.api_key?.base_url ?? "-").lineLimit(1).truncationMode(.middle)
                             }
                             GridRow {
                                 Text("Console").foregroundStyle(.secondary)

@@ -11,7 +11,7 @@ struct EditView: View {
         @Bindable var edit = app.edit
 
         HStack(spacing: 0) {
-            // MARK: Left — sources, prompt, options
+            // MARK: Left: sources, prompt, options
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Card(title: "Source images") {
@@ -130,7 +130,7 @@ struct EditView: View {
 
             Divider()
 
-            // MARK: Right — results
+            // MARK: Right: results
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if !edit.lastSavedPaths.isEmpty {

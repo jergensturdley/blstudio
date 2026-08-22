@@ -3,13 +3,13 @@
 [![CI](https://github.com/jergensturdley/blstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/jergensturdley/blstudio/actions/workflows/ci.yml)
 [![Release](https://github.com/jergensturdley/blstudio/actions/workflows/release.yml/badge.svg)](https://github.com/jergensturdley/blstudio/releases)
 
-A native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)) — Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps `bl` in a friendly GUI focused on:
+A native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)) for Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps `bl` in a friendly GUI focused on:
 
-- **Image generation** — prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible.
-- **Image editing** — drop source images, describe the edit, get results back.
-- **Easy prompting** — saved favorite prompts, one-click style suffixes, quick chat with any Qwen text model (great for iterating on image prompts).
-- **Image receiving** — generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
-- **Quota tracking per API key** — every request is logged locally per key (images, edits, chats, tokens, failures, daily chart). Account-level free-tier quotas and RPM/TPM rate limits are pulled from `bl usage free` / `bl quota check` when your console session is logged in.
+- **Image generation**: prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible.
+- **Image editing**: drop source images, describe the edit, get results back.
+- **Easy prompting**: saved favorite prompts, one-click style suffixes, quick chat with any Qwen text model (great for iterating on image prompts).
+- **Image receiving**: generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
+- **Quota tracking per API key**: every request is logged locally per key (images, edits, chats, tokens, failures, daily chart). Account-level free-tier quotas and RPM/TPM rate limits are pulled from `bl usage free` / `bl quota check` when your console session is logged in.
 
 ## Requirements
 
@@ -33,7 +33,7 @@ You can also open `Package.swift` in Xcode and hit Run.
 
 ## Install a prebuilt release
 
-Grab the latest `BlStudio-<tag>-macos-universal.zip` from [GitHub Releases](https://github.com/jergensturdley/blstudio/releases), unzip, and drag **BlStudio.app** to `/Applications`. Builds are **universal** (Apple Silicon + Intel) and **ad-hoc signed** — there is no paid Apple Developer ID, so on first launch macOS Gatekeeper blocks a plain double-click. Either:
+Grab the latest `BlStudio-<tag>-macos-universal.zip` from [GitHub Releases](https://github.com/jergensturdley/blstudio/releases), unzip, and drag **BlStudio.app** to `/Applications`. Builds are **universal** (Apple Silicon + Intel) and **ad-hoc signed**. There is no paid Apple Developer ID, so on first launch macOS Gatekeeper blocks a plain double-click. Either:
 
 - right-click → **Open**, or
 - `xattr -dr com.apple.quarantine /Applications/BlStudio.app`
@@ -72,12 +72,12 @@ The key selected in the toolbar is passed to `bl` as `--api-key` for image/chat/
 
 Two layers, because Bailian quota lives in two places:
 
-1. **Local ledger (per key)** — BlStudio records every call it makes (`~/Library/Application Support/BlStudio/usage.jsonl`): kind, model, timestamp, image count, prompt/completion tokens, duration, success. Aggregations are shown per API key in the Quota tab. This works even when the console session is expired.
-2. **Account quota (console session)** — `bl usage free` and `bl quota check` report free-tier balances and RPM/TPM headroom. These use the console credentials of the active `bl` profile (not the per-call API key). If you see *"Console session is not logged in or has expired"*, run `bl auth login --console` in a terminal.
+1. **Local ledger (per key)**: BlStudio records every call it makes (`~/Library/Application Support/BlStudio/usage.jsonl`): kind, model, timestamp, image count, prompt/completion tokens, duration, success. Aggregations are shown per API key in the Quota tab. This works even when the console session is expired.
+2. **Account quota (console session)**: `bl usage free` and `bl quota check` report free-tier balances and RPM/TPM headroom. These use the console credentials of the active `bl` profile (not the per-call API key). If you see *"Console session is not logged in or has expired"*, run `bl auth login --console` in a terminal.
 
 ## How it works
 
-BlStudio never talks to the network itself for generation — it shells out to the `bl` binary (`~/.local/bin/bl`, `/opt/homebrew/bin/bl`, `/usr/local/bin/bl`, or `$PATH`, override in Settings) with `--output json` and parses the CLI's JSON contracts:
+BlStudio never talks to the network itself for generation. It shells out to the `bl` binary (`~/.local/bin/bl`, `/opt/homebrew/bin/bl`, `/usr/local/bin/bl`, or `$PATH`, override in Settings) with `--output json` and parses the CLI's JSON contracts:
 
 - `image generate/edit` → `{urls, saved, total, task_id(s)}`
 - `text chat` → OpenAI-compatible completion envelope with `usage`
@@ -102,5 +102,5 @@ Tools/       icon generator, Info.plist template
 
 - Secrets live in the Keychain (`BlStudio` service); only masked prefixes are shown in the UI.
 - The app is unsigned/local-only by design; no App Sandbox (it needs to spawn the `bl`/`node` process and write to your Pictures folder).
-- `usage free` / `quota check` reflect the active `bl` profile's console session, not arbitrary API keys — per-key numbers come from the local ledger.
-- Video, speech, and other `bl` capabilities aren't wrapped yet — the Chat tab plus a terminal cover the rest.
+- `usage free` / `quota check` reflect the active `bl` profile's console session, not arbitrary API keys. Per-key numbers come from the local ledger.
+- Video, speech, and other `bl` capabilities aren't wrapped yet. The Chat tab plus a terminal cover the rest.

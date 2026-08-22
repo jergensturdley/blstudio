@@ -1,17 +1,17 @@
-# BlStudio — macOS client for the bl (Bailian) CLI
+# BlStudio: macOS client for the bl (Bailian) CLI
 #
 # Targets:
-#   make build     — compile (release)
-#   make universal — compile universal (arm64 + x86_64) release binary
-#   make app       — build + bundle dist/BlStudio.app
-#   make bundle    — bundle dist/BlStudio.app from an existing $(BIN) (no rebuild)
-#   make run       — build app bundle and launch it
-#   make dev       — swift run (debug, no bundling)
-#   make test      — run tests (needs full Xcode for XCTest) or fall back to selftest
-#   make selftest  — headless smoke tests against the real bl binary
-#   make zip       — bundle + ad-hoc sign + dist/BlStudio-macos.zip
-#   make icon      — regenerate the app icon
-#   make clean     — remove build artifacts
+#   make build      compile (release)
+#   make universal  compile universal (arm64 + x86_64) release binary
+#   make app        build + bundle dist/BlStudio.app
+#   make bundle     bundle dist/BlStudio.app from an existing $(BIN) (no rebuild)
+#   make run        build app bundle and launch it
+#   make dev        swift run (debug, no bundling)
+#   make test       run tests (needs full Xcode for XCTest) or fall back to selftest
+#   make selftest   headless smoke tests against the real bl binary
+#   make zip        bundle + ad-hoc sign + dist/BlStudio-macos.zip
+#   make icon       regenerate the app icon
+#   make clean      remove build artifacts
 #
 # Works with Apple's GNU Make 3.81 (the default `make` on macOS and on
 # GitHub's macOS runners).

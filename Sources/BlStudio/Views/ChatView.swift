@@ -39,7 +39,7 @@ struct ChatView: View {
                             ContentUnavailableView(
                                 "Quick chat",
                                 systemImage: "bubble.left.and.bubble.right",
-                                description: Text("Ask anything — great for prompt brainstorming,\ncaptions, and idea iteration before generating.")
+                                description: Text("Ask anything. Great for prompt brainstorming,\ncaptions, and idea iteration before generating.")
                             )
                             .padding(.top, 60)
                         }

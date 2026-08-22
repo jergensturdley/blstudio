@@ -90,7 +90,7 @@ struct SettingsView: View {
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
                         GridRow {
                             Text("App").foregroundStyle(.secondary)
-                            Text("BlStudio — a desktop client for the bl (Bailian) CLI")
+                            Text("BlStudio, a desktop client for the bl (Bailian) CLI")
                         }
                         GridRow {
                             Text("CLI").foregroundStyle(.secondary)

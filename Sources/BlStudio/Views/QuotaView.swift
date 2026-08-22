@@ -126,17 +126,17 @@ struct QuotaView: View {
                                 .monospacedDigit()
                         }
                     } else {
-                        Text("—").foregroundStyle(.tertiary)
+                        Text("-").foregroundStyle(.tertiary)
                     }
                 }
                 TableColumn("Expires") { q in
-                    Text(q.expires ?? "—").font(.caption)
+                    Text(q.expires ?? "-").font(.caption)
                 }
                 TableColumn("Auto-stop") { q in
                     switch q.autoStop {
                     case .some(true): Text("on").foregroundStyle(.green)
                     case .some(false): Text("off").foregroundStyle(.secondary)
-                    case nil: Text("—").foregroundStyle(.tertiary)
+                    case nil: Text("-").foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -162,7 +162,7 @@ struct QuotaView: View {
                         Text("\(left, specifier: "%.0f")% free")
                             .foregroundStyle(left < 20 ? .red : .secondary)
                     } else {
-                        Text("—").foregroundStyle(.tertiary)
+                        Text("-").foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -174,7 +174,7 @@ struct QuotaView: View {
         if let r = q.remaining, let t = q.total {
             return "\(Fmt.tokens(Int(r))) / \(Fmt.tokens(Int(t)))"
         }
-        return "—"
+        return "-"
     }
 }
 
