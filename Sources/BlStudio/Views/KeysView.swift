@@ -1,0 +1,180 @@
+import SwiftUI
+
+struct KeysView: View {
+    @Environment(AppState.self) private var app
+
+    @State private var newLabel = ""
+    @State private var newSecret = ""
+    @State private var errorMessage: String?
+    @State private var testResult: [UUID: String] = [:]
+    @State private var testing: UUID?
+
+    var body: some View {
+        @Bindable var keys = app.keysStore
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Card(title: "API keys") {
+                    Text("Keys are stored in the macOS Keychain. The selected key is passed to bl via --api-key; when no key is selected, BlStudio uses the active bl CLI profile.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if keys.keys.isEmpty {
+                        ContentUnavailableView(
+                            "No keys stored",
+                            systemImage: "key.horizontal",
+                            description: Text("Add a DashScope / Bailian API key below, or rely on the CLI default profile (bl auth login).")
+                        )
+                        .padding(.vertical, 10)
+                    }
+
+                    ForEach(keys.keys) { key in
+                        HStack(spacing: 10) {
+                            Image(systemName: keys.activeKeyId == key.id
+                                  ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(keys.activeKeyId == key.id ? Color.accentColor : .secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(key.label).font(.callout.bold())
+                                Text("\(key.masked) · added \(Fmt.shortDate.string(from: key.createdAt))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+
+                            if let test = testResult[key.id] {
+                                Text(test)
+                                    .font(.caption)
+                                    .foregroundStyle(test.hasPrefix("OK") ? .green : .red)
+                                    .lineLimit(1)
+                            }
+
+                            Button {
+                                Task { await testKey(key) }
+                            } label: {
+                                if testing == key.id {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Text("Test")
+                                }
+                            }
+                            .disabled(testing != nil)
+
+                            Button {
+                                keys.activeKeyId = key.id
+                            } label: { Text("Select") }
+                            .disabled(keys.activeKeyId == key.id)
+
+                            Button(role: .destructive) {
+                                keys.remove(key.id)
+                            } label: { Image(systemName: "trash") }
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(.background.opacity(0.6)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(keys.activeKeyId == key.id ? Color.accentColor.opacity(0.5) : .clear, lineWidth: 1)
+                        )
+                    }
+                }
+
+                Card(title: "Add a key") {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                        GridRow {
+                            Text("Label").foregroundStyle(.secondary)
+                            TextField("e.g. work, personal", text: $newLabel)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        GridRow {
+                            Text("API key").foregroundStyle(.secondary)
+                            SecureField("sk-…", text: $newSecret)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                    HStack {
+                        Button {
+                            addKey()
+                        } label: {
+                            Label("Add key", systemImage: "plus")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(newSecret.trimmingCharacters(in: .whitespaces).count < 8)
+
+                        if let errorMessage {
+                            Text(errorMessage).font(.caption).foregroundStyle(.red)
+                        }
+                    }
+                }
+
+                Card(title: "CLI default profile") {
+                    if let auth = app.authStatus {
+                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                            GridRow {
+                                Text("Authenticated").foregroundStyle(.secondary)
+                                Text((auth.authenticated ?? false) ? "yes" : "no")
+                            }
+                            GridRow {
+                                Text("Profile").foregroundStyle(.secondary)
+                                Text(auth.config ?? "—")
+                            }
+                            GridRow {
+                                Text("API key").foregroundStyle(.secondary)
+                                Text(auth.api_key?.masked ?? "—")
+                            }
+                            GridRow {
+                                Text("Base URL").foregroundStyle(.secondary)
+                                Text(auth.api_key?.base_url ?? "—").lineLimit(1).truncationMode(.middle)
+                            }
+                            GridRow {
+                                Text("Console").foregroundStyle(.secondary)
+                                Text(auth.console?.masked.map { "\($0) (\(auth.console?.region ?? "?"))" } ?? "not logged in")
+                            }
+                        }
+                        .font(.caption)
+                        .textSelection(.enabled)
+
+                        Button("Re-check status") {
+                            Task { await app.refreshStatus() }
+                        }
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                    } else {
+                        Text("Status not loaded yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+
+    private func addKey() {
+        errorMessage = nil
+        do {
+            _ = try app.keysStore.add(label: newLabel, secret: newSecret)
+            newLabel = ""
+            newSecret = ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Sends the smallest possible chat request with this key to verify it works.
+    private func testKey(_ key: APIKeyMeta) async {
+        testing = key.id
+        testResult[key.id] = nil
+        defer { testing = nil }
+        guard let secret = app.keysStore.secret(for: key.id) else {
+            testResult[key.id] = "Keychain read failed"
+            return
+        }
+        do {
+            var req = ChatRequest(message: "ping")
+            req.maxTokens = 1
+            let completion = try await app.client.textChat(req, apiKey: secret, timeoutSeconds: 60)
+            testResult[key.id] = "OK · \(completion.model ?? "model")"
+        } catch {
+            testResult[key.id] = String(error.localizedDescription.prefix(80))
+        }
+    }
+}
