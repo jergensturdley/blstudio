@@ -3,13 +3,13 @@
 [![CI](https://github.com/jergensturdley/blstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/jergensturdley/blstudio/actions/workflows/ci.yml)
 [![Release](https://github.com/jergensturdley/blstudio/actions/workflows/release.yml/badge.svg)](https://github.com/jergensturdley/blstudio/releases)
 
-A native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)) for Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps `bl` in a friendly GUI focused on:
+BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)). It drives Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps that CLI in a friendly GUI focused on:
 
-- **Image generation**: prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible.
-- **Image editing**: drop source images, describe the edit, get results back.
-- **Easy prompting**: saved favorite prompts, one-click style suffixes, quick chat with any Qwen text model (great for iterating on image prompts).
-- **Image receiving**: generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
-- **Quota tracking per API key**: every request is logged locally per key (images, edits, chats, tokens, failures, daily chart). Account-level free-tier quotas and RPM/TPM rate limits are pulled from `bl usage free` / `bl quota check` when your console session is logged in.
+- **Image generation**. Prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible.
+- **Image editing**. Drop source images, describe the edit, get results back.
+- **Easy prompting**. Saved favorite prompts, one-click style suffixes, quick chat with any Qwen text model (great for iterating on image prompts).
+- **Image receiving**. Generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
+- **Quota tracking per API key**. Every request is logged locally per key (images, edits, chats, tokens, failures, daily chart). Account-level free-tier quotas and RPM/TPM rate limits are pulled from `bl usage free` / `bl quota check` when your console session is logged in.
 
 ## Requirements
 
@@ -72,8 +72,8 @@ The key selected in the toolbar is passed to `bl` as `--api-key` for image/chat/
 
 Two layers, because Bailian quota lives in two places:
 
-1. **Local ledger (per key)**: BlStudio records every call it makes (`~/Library/Application Support/BlStudio/usage.jsonl`): kind, model, timestamp, image count, prompt/completion tokens, duration, success. Aggregations are shown per API key in the Quota tab. This works even when the console session is expired.
-2. **Account quota (console session)**: `bl usage free` and `bl quota check` report free-tier balances and RPM/TPM headroom. These use the console credentials of the active `bl` profile (not the per-call API key). If you see *"Console session is not logged in or has expired"*, run `bl auth login --console` in a terminal.
+1. **Local ledger (per key)**. BlStudio records every call it makes (`~/Library/Application Support/BlStudio/usage.jsonl`): kind, model, timestamp, image count, prompt/completion tokens, duration, success. Aggregations are shown per API key in the Quota tab. This works even when the console session is expired.
+2. **Account quota (console session)**. `bl usage free` and `bl quota check` report free-tier balances and RPM/TPM headroom. These use the console credentials of the active `bl` profile (not the per-call API key). If you see *"Console session is not logged in or has expired"*, run `bl auth login --console` in a terminal.
 
 ## How it works
 

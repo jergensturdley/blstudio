@@ -11,7 +11,7 @@ struct ImageGenerationResult: Codable, Sendable {
     let task_ids: [String]?
 }
 
-/// `bl text chat` with `--output json`: OpenAI-compatible chat completion envelope.
+/// The OpenAI-compatible chat completion envelope from `bl text chat` with `--output json`.
 struct ChatCompletion: Codable, Sendable {
     struct Choice: Codable, Sendable {
         struct Message: Codable, Sendable {

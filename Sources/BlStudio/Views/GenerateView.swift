@@ -8,7 +8,7 @@ struct GenerateView: View {
         @Bindable var prompts = app.prompts
 
         HStack(spacing: 0) {
-            // MARK: Left: prompt & options
+            // MARK: Left (prompt & options)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Card(title: "Prompt") {
@@ -160,7 +160,7 @@ struct GenerateView: View {
 
             Divider()
 
-            // MARK: Right: results
+            // MARK: Right (results)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if !gen.lastSavedPaths.isEmpty {

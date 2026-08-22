@@ -1,4 +1,4 @@
-# BlStudio: macOS client for the bl (Bailian) CLI
+# BlStudio is a macOS client for the bl (Bailian) CLI
 #
 # Targets:
 #   make build      compile (release)

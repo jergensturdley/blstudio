@@ -228,7 +228,7 @@ final class GenerateModel {
 
     /// Several image models (incl. the default qwen-image-3.0) ignore the batch
     /// parameter `n` and return a single image per request. To honor the requested
-    /// count anyway, run N parallel single-image requests, the same approach as
+    /// count anyway, run N parallel single-image requests. This is the same approach as
     /// `bl image generate --concurrent N`. Seeds are offset per image so a fixed
     /// seed still yields N distinct, reproducible results.
     private func generateFanOut(
@@ -257,7 +257,7 @@ final class GenerateModel {
                         timeoutSeconds: timeoutSeconds,
                         onProgress: { line in
                             Task { @MainActor in
-                                me?.progressLine = "Image \(index + 1)/\(count): \(line)"
+                                me?.progressLine = "Image \(index + 1)/\(count). \(line)"
                             }
                         })
                     return (index, result)
@@ -432,7 +432,7 @@ final class EditModel {
                         timeoutSeconds: timeoutSeconds,
                         onProgress: { line in
                             Task { @MainActor in
-                                me?.progressLine = "Image \(index + 1)/\(count): \(line)"
+                                me?.progressLine = "Image \(index + 1)/\(count). \(line)"
                             }
                         })
                     return (index, result)
