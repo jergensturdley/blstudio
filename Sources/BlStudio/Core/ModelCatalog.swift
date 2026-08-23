@@ -81,7 +81,7 @@ enum ModelCatalog {
         "sana",
     ]
 
-    /// Google Gemini image models (free tier via AI Studio).
+    /// Google Gemini image models (AI Studio key; image generation consumes credits).
     static let geminiImageModels = [
         "gemini-2.5-flash-image",
     ]

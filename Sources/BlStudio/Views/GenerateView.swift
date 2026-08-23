@@ -146,11 +146,11 @@ struct GenerateView: View {
                         }
                         if gen.isGemini {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Gemini image generation uses a free Google AI Studio key. Seed, negative prompt, and watermark are not available.")
+                                Text("Gemini image generation uses a Google AI Studio key and consumes credits (it isn't covered by the free tier). Seed, negative prompt, and watermark are not available.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                                 if !app.geminiConfigured {
-                                    Text("No Gemini key yet. Add a free AI Studio key in the API Keys tab with provider Google Gemini.")
+                                    Text("No Gemini key yet. Add a Google AI Studio key in the API Keys tab with provider Google Gemini.")
                                         .font(.caption2)
                                         .foregroundStyle(.orange)
                                 }

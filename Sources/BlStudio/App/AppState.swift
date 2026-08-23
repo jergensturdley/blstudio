@@ -464,12 +464,12 @@ final class GenerateModel {
         }
     }
 
-    /// Generates images through Google Gemini (free AI Studio key). Each call
+    /// Generates images through Google Gemini (AI Studio key; uses credits). Each call
     /// returns one image, so the requested count is produced sequentially.
     private func generateGemini() async {
         guard canRun else { return }
         guard let apiKey = app.geminiSecret else {
-            phase = .failed("No Gemini API key configured. Add a free Google AI Studio key in the API Keys tab and set its provider to Google Gemini.")
+            phase = .failed("No Gemini API key configured. Add a Google AI Studio key in the API Keys tab and set its provider to Google Gemini. Note that Gemini image generation consumes credits.")
             return
         }
 
