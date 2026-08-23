@@ -57,20 +57,26 @@ enum ModelCatalog {
     static let videoRatiosBailian = ["16:9", "9:16", "1:1"]
     static let videoDurationsBailian = [5, 10]
 
-    /// MiniMax text-to-video models (Hailuo).
+    /// MiniMax text-to-video models (run through the mmx CLI). MiniMax-H3 is the
+    /// Video Generation V2 model with 2K output; Hailuo-2.3 is the legacy T2V model.
     static let videoT2VModelsMiniMax = [
+        "MiniMax-H3",
         "MiniMax-Hailuo-2.3",
-        "T2V-01",
     ]
 
-    /// MiniMax image-to-video models.
+    /// MiniMax image-to-video models (run through the mmx CLI). Hailuo-2.3-Fast
+    /// is the fast I2V variant and requires a first frame.
     static let videoI2VModelsMiniMax = [
-        "I2V-01",
+        "MiniMax-H3",
+        "MiniMax-Hailuo-2.3",
+        "MiniMax-Hailuo-2.3-Fast",
     ]
 
-    /// MiniMax Hailuo accepts duration 6 or 10 and resolution 768P/1080P.
-    static let videoDurationsMiniMax = [6, 10]
-    static let videoResolutionsMiniMax = ["768P", "1080P"]
+    /// MiniMax-H3 aspect ratios (Video Generation V2).
+    static let h3Ratios = ["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
+
+    /// MiniMax-H3 per-clip duration in seconds.
+    static let h3DurationRange = 4...15
 
     // MARK: Free image providers
 
@@ -84,6 +90,19 @@ enum ModelCatalog {
     /// Google Gemini image models (AI Studio key; image generation consumes credits).
     static let geminiImageModels = [
         "gemini-2.5-flash-image",
+    ]
+
+    /// Cloudflare Workers AI image models (free tier: 10,000 neurons/day).
+    static let cloudflareImageModels = [
+        "@cf/black-forest-labs/FLUX.1-schnell",
+        "@cf/bytedance/stable-diffusion-xl-lightning",
+    ]
+
+    /// Hugging Face Inference Providers image models.
+    static let huggingFaceImageModels = [
+        "black-forest-labs/FLUX.1-schnell",
+        "black-forest-labs/FLUX.1-dev",
+        "stabilityai/stable-diffusion-3.5-large",
     ]
 
     /// Aspect ratios shared by the free providers.
@@ -111,10 +130,14 @@ enum ModelCatalog {
 
     // MARK: Music
 
-    /// MiniMax music models.
+    /// MiniMax music models. The `-free` variants are available to all API-key
+    /// users at a lower rate limit; the plain models need a Token Plan or paid
+    /// usage.
     static let musicModels = [
-        "music-2.0",
-        "music-1.5",
+        "music-3.0",
+        "music-3.0-free",
+        "music-2.6",
+        "music-2.6-free",
     ]
 
     // MARK: Speech (text-to-audio)

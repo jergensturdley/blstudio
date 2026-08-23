@@ -6,6 +6,7 @@ struct KeysView: View {
     @State private var newLabel = ""
     @State private var newSecret = ""
     @State private var newProvider: KeyProvider = .bailian
+    @State private var newAccountId = ""
     @State private var errorMessage: String?
     @State private var testResult: [UUID: String] = [:]
     @State private var testing: UUID?
@@ -15,8 +16,19 @@ struct KeysView: View {
         case .minimax: return "eyJ…"
         case .gemini: return "AIza…"
         case .fish: return "Fish Audio API key"
+        case .cloudflare: return "Cloudflare API token"
+        case .huggingface: return "hf…"
         default: return "sk-…"
         }
+    }
+
+    private func keyCaption(_ key: APIKeyMeta) -> String {
+        var parts = [key.masked, "added \(Fmt.shortDate.string(from: key.createdAt))"]
+        if let acct = key.accountId, !acct.isEmpty {
+            let label = key.isCloudflare ? "account" : "provider"
+            parts.append("\(label): \(acct)")
+        }
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
@@ -52,7 +64,7 @@ struct KeysView: View {
                                         .padding(.vertical, 1)
                                         .background(Capsule().fill(key.isMiniMax ? Color.purple.opacity(0.18) : Color.accentColor.opacity(0.14)))
                                 }
-                                Text("\(key.masked) · added \(Fmt.shortDate.string(from: key.createdAt))")
+                                Text(keyCaption(key))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -113,9 +125,23 @@ struct KeysView: View {
                                     Text(p.label).tag(p)
                                 }
                             }
-                            .pickerStyle(.segmented)
+                            .pickerStyle(.menu)
                             .labelsHidden()
                             .frame(maxWidth: 340, alignment: .leading)
+                        }
+                        if newProvider == .cloudflare {
+                            GridRow {
+                                Text("Account ID").foregroundStyle(.secondary)
+                                TextField("Cloudflare account id", text: $newAccountId)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
+                        if newProvider == .huggingface {
+                            GridRow {
+                                Text("Provider").foregroundStyle(.secondary)
+                                TextField("Inference provider (default: fal-ai)", text: $newAccountId)
+                                    .textFieldStyle(.roundedBorder)
+                            }
                         }
                     }
                     HStack {
@@ -178,10 +204,17 @@ struct KeysView: View {
 
     private func addKey() {
         errorMessage = nil
+        if newProvider == .cloudflare
+            && newAccountId.trimmingCharacters(in: .whitespaces).isEmpty {
+            errorMessage = "Cloudflare keys need an Account ID."
+            return
+        }
         do {
-            _ = try app.keysStore.add(label: newLabel, secret: newSecret, provider: newProvider)
+            _ = try app.keysStore.add(label: newLabel, secret: newSecret, provider: newProvider,
+                                      accountId: newAccountId)
             newLabel = ""
             newSecret = ""
+            newAccountId = ""
             newProvider = .bailian
         } catch {
             errorMessage = error.localizedDescription
@@ -207,6 +240,12 @@ struct KeysView: View {
                 testResult[key.id] = msg
             } else if key.isFish {
                 let msg = try await app.fish.validate(apiKey: secret)
+                testResult[key.id] = msg
+            } else if key.isCloudflare {
+                let msg = try await app.cloudflare.validate(apiKey: secret, accountId: key.accountId ?? "")
+                testResult[key.id] = msg
+            } else if key.isHuggingFace {
+                let msg = try await app.huggingface.validate(apiKey: secret)
                 testResult[key.id] = msg
             } else {
                 var req = ChatRequest(message: "ping")

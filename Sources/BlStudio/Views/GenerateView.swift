@@ -117,10 +117,9 @@ struct GenerateView: View {
                     Card(title: "Options") {
                         LabeledContent("Provider") {
                             Picker("", selection: $gen.provider) {
-                                Text("Bailian (bl)").tag(KeyProvider.bailian.rawValue)
-                                Text("MiniMax").tag(KeyProvider.minimax.rawValue)
-                                Text("Pollinations").tag(KeyProvider.pollinations.rawValue)
-                                Text("Google Gemini").tag(KeyProvider.gemini.rawValue)
+                                ForEach(enabledImageProviders, id: \.rawValue) { p in
+                                    Text(p.label).tag(p.rawValue)
+                                }
                             }
                             .pickerStyle(.menu)
                             .labelsHidden()
@@ -156,6 +155,30 @@ struct GenerateView: View {
                                 }
                             }
                         }
+                        if gen.isCloudflare {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Cloudflare Workers AI has a free tier of 10,000 neurons per day. Seed is supported; negative prompt and watermark are not.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if !app.cloudflareConfigured {
+                                    Text("No Cloudflare key yet. Add your API token and account id in the API Keys tab with provider Cloudflare Workers AI.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                        }
+                        if gen.isHuggingFace {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Hugging Face routes through an inference provider; free availability depends on the provider and model. Seed, negative prompt, and watermark are not available.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if !app.huggingFaceConfigured {
+                                    Text("No Hugging Face token yet. Add one in the API Keys tab with provider Hugging Face.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                        }
 
                         LabeledContent("Model") {
                             SuggestingField(title: "Model", text: $gen.model,
@@ -170,7 +193,7 @@ struct GenerateView: View {
                                 .pickerStyle(.menu)
                                 .labelsHidden()
                                 .frame(maxWidth: 300)
-                            } else if gen.isPollinations || gen.isGemini {
+                            } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace {
                                 Picker("", selection: $gen.size) {
                                     ForEach(ModelCatalog.freeAspectRatios, id: \.self) { Text($0).tag($0) }
                                 }
@@ -225,7 +248,7 @@ struct GenerateView: View {
                                 .help("Fill with a random seed")
                             }
                         }
-                        .disabled(gen.isMiniMax || gen.isGemini)
+                        .disabled(gen.isMiniMax || gen.isGemini || gen.isHuggingFace)
                         LabeledContent("Negative prompt") {
                             TextField("things to avoid", text: $gen.negativePrompt)
                                 .textFieldStyle(.roundedBorder)
@@ -297,11 +320,15 @@ struct GenerateView: View {
                 .padding()
             }
             .frame(minWidth: 430, maxWidth: 520)
+            .onAppear { ensureValidProvider() }
+            .onChange(of: app.settingsStore.settings.disabledProviders) { _, _ in
+                ensureValidProvider()
+            }
             .onChange(of: gen.provider) { _, _ in
                 if gen.isMiniMax {
                     if !ModelCatalog.minimaxAspectRatios.contains(gen.size) { gen.size = "1:1" }
                     if gen.count > 9 { gen.count = 9 }
-                } else if gen.isPollinations || gen.isGemini {
+                } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace {
                     if !ModelCatalog.freeAspectRatios.contains(gen.size) { gen.size = "1:1" }
                     if gen.count > 4 { gen.count = 4 }
                 } else {
@@ -366,21 +393,40 @@ struct GenerateView: View {
 
     // Provider-derived helpers
     private var isBailian: Bool { app.generate.provider == KeyProvider.bailian.rawValue }
+    private var enabledImageProviders: [KeyProvider] {
+        KeyProvider.imageProviders.filter { app.isProviderEnabled($0) }
+    }
     private var modelSuggestions: [String] {
         if app.generate.isMiniMax { return ModelCatalog.minimaxImageModels }
         if app.generate.isPollinations { return ModelCatalog.pollinationsModels }
         if app.generate.isGemini { return ModelCatalog.geminiImageModels }
+        if app.generate.isCloudflare { return ModelCatalog.cloudflareImageModels }
+        if app.generate.isHuggingFace { return ModelCatalog.huggingFaceImageModels }
         return ModelCatalog.imageModels
     }
     private var countRange: ClosedRange<Int> {
         if app.generate.isMiniMax { return 1...9 }
-        if app.generate.isPollinations || app.generate.isGemini { return 1...4 }
+        if app.generate.isPollinations || app.generate.isGemini
+            || app.generate.isCloudflare || app.generate.isHuggingFace { return 1...4 }
         return 1...6
     }
     private var countCaption: String {
         if app.generate.isMiniMax { return "MiniMax returns \(app.generate.count) images in one request." }
-        if app.generate.isPollinations || app.generate.isGemini { return "Runs \(app.generate.count) requests in sequence." }
+        if app.generate.isPollinations || app.generate.isGemini
+            || app.generate.isCloudflare || app.generate.isHuggingFace {
+            return "Runs \(app.generate.count) requests in sequence."
+        }
         return "Runs \(app.generate.count) parallel single-image requests (works with every model)."
+    }
+
+    /// If the currently selected provider was switched off in Settings, fall back
+    /// to the first enabled one so the picker never points at a hidden option.
+    private func ensureValidProvider() {
+        let enabled = enabledImageProviders
+        guard !enabled.isEmpty else { return }
+        if !enabled.contains(where: { $0.rawValue == app.generate.provider }) {
+            app.generate.provider = enabled[0].rawValue
+        }
     }
 }
 

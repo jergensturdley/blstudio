@@ -62,7 +62,7 @@ struct MusicView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("MiniMax composes full songs with vocals. Generation usually takes about a minute.")
+                            Text("MiniMax composes full songs with vocals. Generation usually takes about a minute. The `-free` models are available to all API-key users at a lower rate limit; the plain models need a Token Plan or paid usage.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                             if !app.miniMaxConfigured {

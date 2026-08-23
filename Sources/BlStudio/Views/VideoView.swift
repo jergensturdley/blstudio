@@ -37,8 +37,9 @@ struct VideoView: View {
                     Card(title: "Options") {
                         LabeledContent("Provider") {
                             Picker("", selection: $vid.provider) {
-                                Text("Bailian (bl)").tag(KeyProvider.bailian.rawValue)
-                                Text("MiniMax").tag(KeyProvider.minimax.rawValue)
+                                ForEach(enabledVideoProviders, id: \.rawValue) { p in
+                                    Text(p.label).tag(p.rawValue)
+                                }
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
@@ -57,9 +58,14 @@ struct VideoView: View {
 
                         if vid.isMiniMax {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("MiniMax Hailuo renders high-quality video. Duration and resolution apply to Hailuo models. Rendering takes a few minutes.")
+                                Text("MiniMax video runs through the mmx CLI. MiniMax-H3 is the newest model (2K output, 4–15 s clips); rendering takes a few minutes.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+                                if !app.mmx.isAvailable() {
+                                    Text("mmx CLI not found. Install it with `npm i -g mmx-cli`, or set its path in Settings.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.red)
+                                }
                                 if !app.miniMaxConfigured {
                                     Text("No MiniMax key yet. Add one in the API Keys tab with provider MiniMax.")
                                         .font(.caption2)
@@ -107,15 +113,23 @@ struct VideoView: View {
                             }
                         }
 
-                        LabeledContent("Resolution") {
-                            Picker("", selection: $vid.resolution) {
-                                ForEach(vid.isMiniMax ? ModelCatalog.videoResolutionsMiniMax : ModelCatalog.videoResolutionsBailian, id: \.self) {
-                                    Text($0).tag($0)
+                        if !vid.isMiniMax {
+                            LabeledContent("Resolution") {
+                                Picker("", selection: $vid.resolution) {
+                                    ForEach(ModelCatalog.videoResolutionsBailian, id: \.self) {
+                                        Text($0).tag($0)
+                                    }
                                 }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                                .frame(maxWidth: 300)
                             }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .frame(maxWidth: 300)
+                        } else if vid.isH3 {
+                            LabeledContent("Resolution") {
+                                Text("2K (fixed)")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         if !vid.isMiniMax {
@@ -127,17 +141,41 @@ struct VideoView: View {
                                 .labelsHidden()
                                 .frame(maxWidth: 300)
                             }
+                        } else if vid.isH3 {
+                            LabeledContent("Aspect ratio") {
+                                Picker("", selection: $vid.ratio) {
+                                    ForEach(ModelCatalog.h3Ratios, id: \.self) { Text($0).tag($0) }
+                                }
+                                .pickerStyle(.menu)
+                                .labelsHidden()
+                                .frame(maxWidth: 300)
+                            }
                         }
 
-                        LabeledContent("Duration") {
-                            Picker("", selection: $vid.duration) {
-                                ForEach(vid.isMiniMax ? ModelCatalog.videoDurationsMiniMax : ModelCatalog.videoDurationsBailian, id: \.self) {
-                                    Text("\($0)s").tag($0)
+                        if !vid.isMiniMax {
+                            LabeledContent("Duration") {
+                                Picker("", selection: $vid.duration) {
+                                    ForEach(ModelCatalog.videoDurationsBailian, id: \.self) {
+                                        Text("\($0)s").tag($0)
+                                    }
                                 }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                                .frame(maxWidth: 300)
                             }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .frame(maxWidth: 300)
+                        } else if vid.isH3 {
+                            LabeledContent("Duration") {
+                                Stepper(value: $vid.duration, in: ModelCatalog.h3DurationRange) {
+                                    Text("\(vid.duration)s").monospacedDigit()
+                                }
+                                .fixedSize()
+                            }
+                        } else {
+                            LabeledContent("Duration") {
+                                Text("set by model")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         if !vid.isMiniMax {
@@ -190,6 +228,10 @@ struct VideoView: View {
                 .padding()
             }
             .frame(minWidth: 430, maxWidth: 520)
+            .onAppear { ensureValidVideoProvider() }
+            .onChange(of: app.settingsStore.settings.disabledProviders) { _, _ in
+                ensureValidVideoProvider()
+            }
             .onChange(of: vid.provider) { _, _ in normalize(vid) }
             .onChange(of: vid.mode) { _, _ in normalize(vid) }
             .fileImporter(isPresented: $showFileImporter,
@@ -266,6 +308,19 @@ struct VideoView: View {
             vid.resolution = "1080P"
             vid.ratio = "16:9"
             vid.duration = 5
+        }
+    }
+
+    private var enabledVideoProviders: [KeyProvider] {
+        KeyProvider.videoProviders.filter { app.isProviderEnabled($0) }
+    }
+
+    private func ensureValidVideoProvider() {
+        let enabled = enabledVideoProviders
+        guard !enabled.isEmpty else { return }
+        if !enabled.contains(where: { $0.rawValue == app.video.provider }) {
+            app.video.provider = enabled[0].rawValue
+            normalize(app.video)
         }
     }
 }

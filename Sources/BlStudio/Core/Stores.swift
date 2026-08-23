@@ -39,16 +39,25 @@ enum AppPaths {
 
 struct AppSettings: Codable, Sendable {
     var blBinaryPath: String = ""          // empty → auto-detect
+    /// Optional so settings files written before the mmx integration decode cleanly.
+    var mmxBinaryPath: String? = nil       // empty/nil → auto-detect (mmx CLI for MiniMax video/quota)
     var imageLibraryDir: String = ""       // empty → ~/Pictures/BlStudio
     var defaultImageModel: String = ""     // empty → bl default (qwen-image-3.0)
     var defaultChatModel: String = ""
     var defaultSize: String = "1:1"
     var pollInterval: Int = 3
     var requestTimeout: Int = 900
+    /// Providers the user switched off in Settings (raw values). Optional so
+    /// older settings files decode cleanly; nil/absent means everything is on.
+    var disabledProviders: [String]? = nil
 
     var libraryURL: URL {
         if imageLibraryDir.isEmpty { return AppPaths.defaultImageLibrary }
         return URL(fileURLWithPath: (imageLibraryDir as NSString).expandingTildeInPath)
+    }
+
+    func isProviderEnabled(_ p: KeyProvider) -> Bool {
+        !(disabledProviders ?? []).contains(p.rawValue)
     }
 }
 
@@ -72,6 +81,21 @@ final class SettingsStore {
         if let data = try? JSONEncoder().encode(settings) {
             try? data.write(to: AppPaths.settingsFile, options: .atomic)
         }
+    }
+
+    /// Provider on/off switches (Settings tab).
+    func isProviderEnabled(_ p: KeyProvider) -> Bool {
+        settings.isProviderEnabled(p)
+    }
+
+    func setProviderEnabled(_ p: KeyProvider, enabled: Bool) {
+        var disabled = Set(settings.disabledProviders ?? [])
+        if enabled {
+            disabled.remove(p.rawValue)
+        } else {
+            disabled.insert(p.rawValue)
+        }
+        settings.disabledProviders = disabled.isEmpty ? nil : Array(disabled).sorted()
     }
 }
 
@@ -169,7 +193,8 @@ final class KeysStore {
         activeMeta?.label ?? "CLI default profile"
     }
 
-    func add(label: String, secret: String, provider: KeyProvider = .bailian) throws -> APIKeyMeta {
+    func add(label: String, secret: String, provider: KeyProvider = .bailian,
+             accountId: String? = nil) throws -> APIKeyMeta {
         let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 8 else {
             throw NSError(domain: "BlStudio", code: 1,
@@ -178,6 +203,8 @@ final class KeysStore {
         var meta = APIKeyMeta(label: label.isEmpty ? maskAPIKey(trimmed) : label,
                               masked: maskAPIKey(trimmed))
         meta.provider = provider
+        let acct = accountId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        meta.accountId = acct.isEmpty ? nil : acct
         try Keychain.setSecret(trimmed, account: meta.id.uuidString)
         keys.append(meta)
         if activeKeyId == nil { activeKeyId = meta.id }
@@ -243,6 +270,54 @@ final class KeysStore {
 
     func activeFishLabel() -> String {
         activeFishMeta?.label ?? "No Fish Audio key"
+    }
+
+    // MARK: Cloudflare key resolution
+
+    var cloudflareConfigured: Bool { keys.contains { $0.isCloudflare } }
+
+    /// The Cloudflare key to use: the globally active key when it is a Cloudflare
+    /// key, otherwise the first Cloudflare key in the list.
+    var activeCloudflareMeta: APIKeyMeta? {
+        if let m = activeMeta, m.isCloudflare { return m }
+        return keys.first { $0.isCloudflare }
+    }
+
+    var activeCloudflareSecret: String? {
+        guard let m = activeCloudflareMeta else { return nil }
+        return Keychain.getSecret(account: m.id.uuidString)
+    }
+
+    var activeCloudflareAccountId: String? {
+        activeCloudflareMeta?.accountId
+    }
+
+    func activeCloudflareLabel() -> String {
+        activeCloudflareMeta?.label ?? "No Cloudflare key"
+    }
+
+    // MARK: Hugging Face key resolution
+
+    var huggingFaceConfigured: Bool { keys.contains { $0.isHuggingFace } }
+
+    /// The Hugging Face key to use: the globally active key when it is a Hugging
+    /// Face key, otherwise the first Hugging Face key in the list.
+    var activeHuggingFaceMeta: APIKeyMeta? {
+        if let m = activeMeta, m.isHuggingFace { return m }
+        return keys.first { $0.isHuggingFace }
+    }
+
+    var activeHuggingFaceSecret: String? {
+        guard let m = activeHuggingFaceMeta else { return nil }
+        return Keychain.getSecret(account: m.id.uuidString)
+    }
+
+    var activeHuggingFaceProvider: String? {
+        activeHuggingFaceMeta?.accountId
+    }
+
+    func activeHuggingFaceLabel() -> String {
+        activeHuggingFaceMeta?.label ?? "No Hugging Face key"
     }
 
     func updateLabel(_ id: UUID, label: String) {

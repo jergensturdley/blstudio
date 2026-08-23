@@ -230,6 +230,8 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
     case pollinations = "pollinations"
     case gemini = "gemini"
     case fish = "fish"
+    case cloudflare = "cloudflare"
+    case huggingface = "huggingface"
 
     var label: String {
         switch self {
@@ -238,11 +240,21 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
         case .pollinations: return "Pollinations"
         case .gemini: return "Google Gemini"
         case .fish: return "Fish Audio"
+        case .cloudflare: return "Cloudflare Workers AI"
+        case .huggingface: return "Hugging Face"
         }
     }
 
     /// Pollinations is keyless; the others need a stored API key.
     var needsKey: Bool { self != .pollinations }
+
+    /// Which providers back each feature tab (used to build pickers and to
+    /// respect the Settings on/off switches).
+    static let imageProviders: [KeyProvider] = [
+        .bailian, .minimax, .pollinations, .gemini, .cloudflare, .huggingface,
+    ]
+    static let videoProviders: [KeyProvider] = [.bailian, .minimax]
+    static let speechProviders: [KeyProvider] = [.minimax, .fish]
 }
 
 struct APIKeyMeta: Codable, Identifiable, Sendable {
@@ -253,9 +265,14 @@ struct APIKeyMeta: Codable, Identifiable, Sendable {
     var createdAt: Date = Date()
     /// Nil for keys saved before providers existed. Treated as Bailian.
     var provider: KeyProvider?
+    /// Provider-specific account identifier: the Cloudflare account id for
+    /// Workers AI, or the inference provider name for Hugging Face.
+    var accountId: String?
 
     var resolvedProvider: KeyProvider { provider ?? .bailian }
     var isMiniMax: Bool { resolvedProvider == .minimax }
     var isGemini: Bool { resolvedProvider == .gemini }
     var isFish: Bool { resolvedProvider == .fish }
+    var isCloudflare: Bool { resolvedProvider == .cloudflare }
+    var isHuggingFace: Bool { resolvedProvider == .huggingface }
 }

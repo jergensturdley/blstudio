@@ -11,6 +11,9 @@ final class AppState {
     let pollinations = PollinationsClient()
     let gemini = GeminiClient()
     let fish = FishClient()
+    let cloudflare = CloudflareClient()
+    let huggingface = HuggingFaceClient()
+    let mmx = MmxClient()
     @ObservationIgnored let settingsStore = SettingsStore()
     @ObservationIgnored let keysStore = KeysStore()
     @ObservationIgnored let ledger = UsageLedger()
@@ -32,6 +35,7 @@ final class AppState {
 
     init() {
         client.binaryOverride = settingsStore.settings.blBinaryPath.nonEmptyOrNil
+        mmx.binaryOverride = (settingsStore.settings.mmxBinaryPath ?? "").nonEmptyOrNil
         generate = GenerateModel(app: self)
         edit = EditModel(app: self)
         chat = ChatModel(app: self)
@@ -43,6 +47,7 @@ final class AppState {
 
     func applySettings() {
         client.binaryOverride = settingsStore.settings.blBinaryPath.nonEmptyOrNil
+        mmx.binaryOverride = (settingsStore.settings.mmxBinaryPath ?? "").nonEmptyOrNil
     }
 
     func refreshStatus() async {
@@ -74,6 +79,25 @@ final class AppState {
     var fishSecret: String? { keysStore.activeFishSecret }
     var fishKeyId: UUID? { keysStore.activeFishMeta?.id }
     var fishKeyLabel: String { keysStore.activeFishLabel() }
+
+    /// Cloudflare Workers AI key resolution.
+    var cloudflareConfigured: Bool { keysStore.cloudflareConfigured }
+    var cloudflareSecret: String? { keysStore.activeCloudflareSecret }
+    var cloudflareAccountId: String? { keysStore.activeCloudflareAccountId }
+    var cloudflareKeyId: UUID? { keysStore.activeCloudflareMeta?.id }
+    var cloudflareKeyLabel: String { keysStore.activeCloudflareLabel() }
+
+    /// Hugging Face key resolution.
+    var huggingFaceConfigured: Bool { keysStore.huggingFaceConfigured }
+    var huggingFaceSecret: String? { keysStore.activeHuggingFaceSecret }
+    var huggingFaceProvider: String? { keysStore.activeHuggingFaceProvider }
+    var huggingFaceKeyId: UUID? { keysStore.activeHuggingFaceMeta?.id }
+    var huggingFaceKeyLabel: String { keysStore.activeHuggingFaceLabel() }
+
+    /// Provider on/off switches from Settings.
+    func isProviderEnabled(_ p: KeyProvider) -> Bool {
+        settingsStore.isProviderEnabled(p)
+    }
 
     func recordUsage(kind: WorkKind, model: String?, images: Int = 0,
                      promptTokens: Int = 0, completionTokens: Int = 0,
@@ -244,6 +268,8 @@ final class GenerateModel {
     var isMiniMax: Bool { provider == KeyProvider.minimax.rawValue }
     var isPollinations: Bool { provider == KeyProvider.pollinations.rawValue }
     var isGemini: Bool { provider == KeyProvider.gemini.rawValue }
+    var isCloudflare: Bool { provider == KeyProvider.cloudflare.rawValue }
+    var isHuggingFace: Bool { provider == KeyProvider.huggingface.rawValue }
 
     func generate() async {
         if isMiniMax {
@@ -256,6 +282,14 @@ final class GenerateModel {
         }
         if isGemini {
             await generateGemini()
+            return
+        }
+        if isCloudflare {
+            await generateCloudflare()
+            return
+        }
+        if isHuggingFace {
+            await generateHuggingFace()
             return
         }
         guard canRun else { return }
@@ -518,6 +552,140 @@ final class GenerateModel {
             app.history.add(HistoryEntry(
                 kind: .imageGenerate, prompt: promptText, model: displayModel,
                 keyId: app.geminiKeyId, keyLabel: app.geminiKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    /// Generates images through Cloudflare Workers AI (free tier). FLUX accepts a
+    /// seed; the requested count fans out with offset seeds.
+    private func generateCloudflare() async {
+        guard canRun else { return }
+        guard let apiKey = app.cloudflareSecret else {
+            phase = .failed("No Cloudflare API token configured. Add one in the API Keys tab with provider Cloudflare Workers AI.")
+            return
+        }
+        guard let accountId = app.cloudflareAccountId,
+              !accountId.trimmingCharacters(in: .whitespaces).isEmpty else {
+            phase = .failed("This Cloudflare key is missing its Account ID. Re-add the key in the API Keys tab with your Cloudflare account id.")
+            return
+        }
+
+        let ratio = ModelCatalog.freeAspectRatios.contains(size) ? size : "1:1"
+        let (w, h) = ModelCatalog.pixelSize(forAspectRatio: ratio)
+        let modelUsed = model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "@cf/black-forest-labs/FLUX.1-schnell" : model
+        let displayModel = "Cloudflare \(modelUsed)"
+        let promptText = composedPrompt
+
+        let baseSeed: Int?
+        do {
+            baseSeed = try parseSeed(enabled: seedEnabled, text: seedText)
+        } catch {
+            phase = .failed(error.localizedDescription)
+            return
+        }
+
+        phase = .running
+        progressLine = "Contacting Cloudflare…"
+        lastResult = nil
+        lastSavedPaths = []
+
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let prefix = AppState.outPrefix(for: prompt, kind: "img")
+        let started = Date()
+
+        do {
+            var saved: [String] = []
+            let total = max(1, count)
+            for i in 0..<total {
+                progressLine = "Generating image \(i + 1)/\(total)…"
+                let dest = outDir.appendingPathComponent("\(prefix)-\(i + 1).png")
+                let url = try await app.cloudflare.generate(
+                    apiKey: apiKey, accountId: accountId, model: modelUsed,
+                    prompt: promptText, width: w, height: h,
+                    seed: baseSeed.map { $0 + i }, dest: dest)
+                saved.append(url.path)
+            }
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPaths = saved
+            phase = .done
+            app.recordUsage(kind: .imageGenerate, model: displayModel, images: saved.count,
+                            durationMs: ms, ok: true, keyIdOverride: app.cloudflareKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.cloudflareKeyId, keyLabel: app.cloudflareKeyLabel,
+                savedPaths: saved, remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .imageGenerate, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: app.cloudflareKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.cloudflareKeyId, keyLabel: app.cloudflareKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    /// Generates images through Hugging Face Inference Providers. The count fans
+    /// out as sequential requests (no seed on the OpenAI-compatible images route).
+    private func generateHuggingFace() async {
+        guard canRun else { return }
+        guard let apiKey = app.huggingFaceSecret else {
+            phase = .failed("No Hugging Face token configured. Add one in the API Keys tab with provider Hugging Face.")
+            return
+        }
+
+        let ratio = ModelCatalog.freeAspectRatios.contains(size) ? size : "1:1"
+        let (w, h) = ModelCatalog.pixelSize(forAspectRatio: ratio)
+        let modelUsed = model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "black-forest-labs/FLUX.1-schnell" : model
+        let displayModel = "Hugging Face \(modelUsed)"
+        let promptText = composedPrompt
+
+        phase = .running
+        progressLine = "Contacting Hugging Face…"
+        lastResult = nil
+        lastSavedPaths = []
+
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let prefix = AppState.outPrefix(for: prompt, kind: "img")
+        let started = Date()
+
+        do {
+            var saved: [String] = []
+            let total = max(1, count)
+            for i in 0..<total {
+                progressLine = "Generating image \(i + 1)/\(total)…"
+                let dest = outDir.appendingPathComponent("\(prefix)-\(i + 1).png")
+                let url = try await app.huggingface.generate(
+                    apiKey: apiKey, provider: app.huggingFaceProvider, model: modelUsed,
+                    prompt: promptText, width: w, height: h, dest: dest)
+                saved.append(url.path)
+            }
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPaths = saved
+            phase = .done
+            app.recordUsage(kind: .imageGenerate, model: displayModel, images: saved.count,
+                            durationMs: ms, ok: true, keyIdOverride: app.huggingFaceKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.huggingFaceKeyId, keyLabel: app.huggingFaceKeyLabel,
+                savedPaths: saved, remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .imageGenerate, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: app.huggingFaceKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.huggingFaceKeyId, keyLabel: app.huggingFaceKeyLabel,
                 savedPaths: [], remoteUrls: [], taskId: nil,
                 durationMs: ms, ok: false, detail: error.localizedDescription))
         }
@@ -796,6 +964,8 @@ final class VideoModel {
     init(app: AppState) { self.app = app }
 
     var isMiniMax: Bool { provider == KeyProvider.minimax.rawValue }
+    /// MiniMax-H3 (Video Generation V2) takes duration/ratio; legacy Hailuo doesn't.
+    var isH3: Bool { model == MmxClient.h3Model }
 
     var canRun: Bool {
         !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && phase != .running
@@ -890,9 +1060,31 @@ final class VideoModel {
             phase = .failed("No MiniMax API key configured. Add one in the API Keys tab and set its provider to MiniMax.")
             return
         }
+        guard app.mmx.isAvailable() else {
+            phase = .failed("MiniMax video needs the mmx CLI. Install it with `npm i -g mmx-cli`, or set its path in Settings.")
+            return
+        }
+
+        let effectiveModel: String
+        if !model.trimmingCharacters(in: .whitespaces).isEmpty {
+            effectiveModel = model
+        } else {
+            effectiveModel = mode == "i2v" ? "MiniMax-Hailuo-2.3" : MmxClient.h3Model
+        }
+        let isH3 = effectiveModel == MmxClient.h3Model
+        let displayModel = "MiniMax \(effectiveModel)"
+
+        // MiniMax-H3 arrived in mmx 1.0.19; older CLIs can't run it.
+        if isH3 {
+            if let v = try? await app.mmx.cliVersion(),
+               !MmxClient.versionAtLeast(v, MmxClient.h3MinVersion) {
+                phase = .failed("MiniMax-H3 needs mmx \(MmxClient.h3MinVersion) or newer (found \(v)). Run `mmx update` in a terminal.")
+                return
+            }
+        }
 
         phase = .running
-        progressLine = "Contacting MiniMax…"
+        progressLine = "Contacting MiniMax via mmx…"
         lastSavedPath = nil
 
         let promptText = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -900,55 +1092,44 @@ final class VideoModel {
         AppPaths.ensureDir(outDir)
         let dest = outDir.appendingPathComponent("\(AppState.outPrefix(for: prompt, kind: "vid")).mp4")
 
-        // MiniMax accepts the first frame as a URL or a data: URI.
-        var firstFrame: String? = nil
+        // First frame: a local path or URL handed to mmx as-is (it base64-encodes
+        // local files itself).
+        var firstFrame: String?
         if mode == "i2v" {
-            if let f = i2vFileURL, let data = try? Data(contentsOf: f) {
-                let mime: String
-                switch f.pathExtension.lowercased() {
-                case "png": mime = "image/png"
-                case "webp": mime = "image/webp"
-                case "gif": mime = "image/gif"
-                default: mime = "image/jpeg"
-                }
-                firstFrame = "data:\(mime);base64," + data.base64EncodedString()
+            if let f = i2vFileURL {
+                firstFrame = f.path
             } else {
                 firstFrame = imageURL.nonEmptyOrNil
             }
+            if firstFrame == nil {
+                phase = .failed("Choose a first-frame image (or paste an image URL) for image-to-video.")
+                return
+            }
         }
-
-        let effectiveModel: String
-        if !model.trimmingCharacters(in: .whitespaces).isEmpty {
-            effectiveModel = model
-        } else {
-            effectiveModel = mode == "i2v" ? "I2V-01" : "MiniMax-Hailuo-2.3"
-        }
-        let isHailuo = effectiveModel.contains("Hailuo")
-        let displayModel = "MiniMax \(effectiveModel)"
 
         let started = Date()
         do {
-            let saved = try await app.minimax.generateVideoAndWait(
+            let result = try await app.mmx.videoGenerate(
                 apiKey: apiKey,
                 model: effectiveModel,
                 prompt: promptText,
-                firstFrameImage: firstFrame,
-                duration: isHailuo ? duration : nil,
-                resolution: isHailuo ? resolution : nil,
+                duration: isH3 ? duration : nil,
+                ratio: isH3 ? ratio : nil,
+                firstFrame: firstFrame,
                 dest: dest,
-                pollSeconds: 10,
-                onStatus: { [weak self] line in
+                timeoutSeconds: app.settingsStore.settings.requestTimeout,
+                onProgress: { [weak self] line in
                     Task { @MainActor in self?.progressLine = line }
                 })
             let ms = Int(Date().timeIntervalSince(started) * 1000)
-            lastSavedPath = saved.path
+            lastSavedPath = dest.path
             phase = .done
             app.recordUsage(kind: .videoGenerate, model: displayModel,
                             durationMs: ms, ok: true, keyIdOverride: app.miniMaxKeyId)
             app.history.add(HistoryEntry(
                 kind: .videoGenerate, prompt: promptText, model: displayModel,
                 keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
-                savedPaths: [saved.path], remoteUrls: [], taskId: nil,
+                savedPaths: [dest.path], remoteUrls: [], taskId: result?.task_id,
                 durationMs: ms, ok: true, detail: nil))
         } catch {
             let ms = Int(Date().timeIntervalSince(started) * 1000)
@@ -973,7 +1154,7 @@ final class MusicModel {
 
     var prompt: String = ""
     var lyrics: String = ""
-    var model: String = "music-2.0"
+    var model: String = "music-3.0"
 
     var phase: GenPhase = .idle
     var progressLine: String = ""
@@ -1000,7 +1181,7 @@ final class MusicModel {
         let outDir = app.settingsStore.settings.libraryURL
         AppPaths.ensureDir(outDir)
         let dest = outDir.appendingPathComponent("\(AppState.outPrefix(for: prompt, kind: "mus")).mp3")
-        let effectiveModel = model.trimmingCharacters(in: .whitespaces).isEmpty ? "music-2.0" : model
+        let effectiveModel = model.trimmingCharacters(in: .whitespaces).isEmpty ? "music-3.0" : model
         let displayModel = "MiniMax \(effectiveModel)"
 
         let started = Date()
@@ -1242,6 +1423,12 @@ final class QuotaModel {
     var loading = false
     var lastRefreshed: Date?
 
+    /// MiniMax token-plan quota via the mmx CLI.
+    var mmxQuota: [MmxQuotaRemain] = []
+    var mmxQuotaError: String?
+    var mmxLoading = false
+    var mmxLastRefreshed: Date?
+
     init(app: AppState) { self.app = app }
 
     func refresh() async {
@@ -1258,6 +1445,33 @@ final class QuotaModel {
                 do { _ = try await app.client.usageFree() }
                 catch { quotaError = error.localizedDescription }
             }
+        }
+        await refreshMmx()
+    }
+
+    /// Fetches MiniMax token-plan quota through `mmx quota show`.
+    func refreshMmx() async {
+        mmxLoading = true
+        mmxQuotaError = nil
+        defer { mmxLoading = false; mmxLastRefreshed = Date() }
+        guard app.mmx.isAvailable() else {
+            mmxQuota = []
+            return
+        }
+        guard let key = app.miniMaxSecret else {
+            mmxQuota = []
+            mmxQuotaError = "No MiniMax key configured. Add one in the API Keys tab."
+            return
+        }
+        do {
+            let q = try await app.mmx.quotaShow(apiKey: key)
+            mmxQuota = q.model_remains ?? []
+            if mmxQuota.isEmpty {
+                mmxQuotaError = "This key reports no token-plan quota (pay-as-you-go keys have no model quotas)."
+            }
+        } catch {
+            mmxQuota = []
+            mmxQuotaError = error.localizedDescription
         }
     }
 }

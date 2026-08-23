@@ -212,6 +212,9 @@ final class MiniMaxClient: @unchecked Sendable {
         ]
         if let lyrics = lyrics?.trimmingCharacters(in: .whitespacesAndNewlines), !lyrics.isEmpty {
             body["lyrics"] = lyrics
+        } else {
+            // music-3.0 / music-2.6 require either lyrics or the instrumental flag.
+            body["is_instrumental"] = true
         }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 

@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(AppState.self) private var app
     @State private var choosingDir = false
     @State private var blCheckMessage: String?
+    @State private var mmxCheckMessage: String?
 
     var body: some View {
         @Bindable var settingsStore = app.settingsStore
@@ -41,6 +42,25 @@ struct SettingsView: View {
                     }
                 }
 
+                Card(title: "mmx CLI") {
+                    LabeledContent("Binary path") {
+                        HStack {
+                            TextField("auto-detect", text: mmxPathBinding)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Check") {
+                                Task { await checkMmx() }
+                            }
+                        }
+                        .frame(maxWidth: 420)
+                    }
+                    if let msg = mmxCheckMessage {
+                        Text(msg).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("mmx (mmx-cli) runs MiniMax video generation, including MiniMax-H3, and reads MiniMax token-plan quotas. MiniMax-H3 needs mmx 1.0.19 or newer.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Card(title: "Images") {
                     LabeledContent("Library folder") {
                         HStack {
@@ -66,6 +86,23 @@ struct SettingsView: View {
                         .frame(maxWidth: 360)
                     }
                     Text("The Generate pane starts with this size; models and other parameters can be set per run.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Card(title: "Providers") {
+                    ForEach(KeyProvider.allCases, id: \.self) { p in
+                        Toggle(isOn: providerBinding(p)) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(p.label).font(.callout)
+                                Text(providerNote(p))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+                    }
+                    Text("Turning a provider off hides it from the Generate, Video, and Speech pickers. Stored keys are kept.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -116,6 +153,9 @@ struct SettingsView: View {
         .onChange(of: settingsStore.settings.blBinaryPath) { _, _ in
             app.applySettings()
         }
+        .onChange(of: settingsStore.settings.mmxBinaryPath) { _, _ in
+            app.applySettings()
+        }
         .onAppear {
             app.generate.size = settingsStore.settings.defaultSize
             if app.generate.model.isEmpty {
@@ -134,6 +174,46 @@ struct SettingsView: View {
             blCheckMessage = "Found: \(v)"
         } catch {
             blCheckMessage = error.localizedDescription
+        }
+    }
+
+    private func checkMmx() async {
+        app.applySettings()
+        do {
+            let v = try await app.mmx.cliVersion()
+            if MmxClient.versionAtLeast(v, MmxClient.h3MinVersion) {
+                mmxCheckMessage = "Found: mmx \(v)"
+            } else {
+                mmxCheckMessage = "Found: mmx \(v). MiniMax-H3 needs \(MmxClient.h3MinVersion) or newer; run `mmx update`."
+            }
+        } catch {
+            mmxCheckMessage = error.localizedDescription
+        }
+    }
+
+    private var mmxPathBinding: Binding<String> {
+        Binding(
+            get: { app.settingsStore.settings.mmxBinaryPath ?? "" },
+            set: { app.settingsStore.settings.mmxBinaryPath = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private func providerBinding(_ p: KeyProvider) -> Binding<Bool> {
+        Binding(
+            get: { app.settingsStore.isProviderEnabled(p) },
+            set: { app.settingsStore.setProviderEnabled(p, enabled: $0) }
+        )
+    }
+
+    private func providerNote(_ p: KeyProvider) -> String {
+        switch p {
+        case .bailian: return "Images, video, and chat via the bl CLI"
+        case .minimax: return "Images, video, music, and speech"
+        case .pollinations: return "Free, keyless images"
+        case .gemini: return "Images (uses credits)"
+        case .fish: return "Speech (Fish Audio)"
+        case .cloudflare: return "Free-tier images (Workers AI FLUX)"
+        case .huggingface: return "Images via inference providers"
         }
     }
 }

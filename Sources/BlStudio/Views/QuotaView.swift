@@ -80,6 +80,65 @@ struct QuotaView: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
+
+                // MARK: MiniMax quota (mmx CLI)
+                Card(title: "MiniMax quota (token plan)") {
+                    HStack(spacing: 10) {
+                        Text("Remaining token-plan quota per model, via the mmx CLI (`mmx quota show`). Pay-as-you-go keys don't report model quotas.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            Task { await app.quota.refreshMmx() }
+                        } label: {
+                            if app.quota.mmxLoading {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Refresh", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .disabled(app.quota.mmxLoading)
+                    }
+
+                    if !app.quota.mmxQuota.isEmpty {
+                        Table(app.quota.mmxQuota) {
+                            TableColumn("Model") { r in
+                                Text(r.model_name ?? "?")
+                            }
+                            TableColumn("Remaining") { r in
+                                Text(mmxRemainingText(r))
+                                    .monospacedDigit()
+                            }
+                            TableColumn("Used") { r in
+                                if let pct = mmxUsagePercent(r) {
+                                    HStack(spacing: 6) {
+                                        ProgressView(value: min(pct, 100), total: 100)
+                                            .frame(width: 70)
+                                        Text("\(pct, specifier: "%.1f")%")
+                                            .monospacedDigit()
+                                    }
+                                } else {
+                                    Text("-").foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .frame(minHeight: 120)
+                    } else if let err = app.quota.mmxQuotaError {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if !app.mmx.isAvailable() {
+                        Text("Install the mmx CLI (`npm i -g mmx-cli`) to see MiniMax quotas.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let refreshed = app.quota.mmxLastRefreshed {
+                        Text("Last refreshed \(Fmt.shortDate.string(from: refreshed))")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
             .padding()
         }
@@ -106,6 +165,23 @@ struct QuotaView: View {
                                label: "CLI default profile", masked: app.authStatus?.api_key?.masked))
         }
         return rows
+    }
+
+    private func mmxRemainingText(_ r: MmxQuotaRemain) -> String {
+        // status 3 means unlimited.
+        if r.current_interval_status == 3 { return "unlimited" }
+        guard let total = r.current_interval_total_count, total > 0 else { return "no plan quota" }
+        let used = r.current_interval_usage_count ?? 0
+        return "\(max(0, total - used)) of \(total) left"
+    }
+
+    private func mmxUsagePercent(_ r: MmxQuotaRemain) -> Double? {
+        if let pct = r.current_interval_remaining_percent {
+            return max(0, min(100, 100 - pct))
+        }
+        guard let total = r.current_interval_total_count, total > 0 else { return nil }
+        let used = r.current_interval_usage_count ?? 0
+        return Double(used) / Double(total) * 100
     }
 
     private var freeQuotaTable: some View {

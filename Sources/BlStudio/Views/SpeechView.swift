@@ -35,8 +35,9 @@ struct SpeechView: View {
                     Card(title: "Options") {
                         LabeledContent("Provider") {
                             Picker("", selection: $sp.provider) {
-                                Text("MiniMax").tag(KeyProvider.minimax.rawValue)
-                                Text("Fish Audio").tag(KeyProvider.fish.rawValue)
+                                ForEach(enabledSpeechProviders, id: \.rawValue) { p in
+                                    Text(p.label).tag(p.rawValue)
+                                }
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
@@ -74,6 +75,10 @@ struct SpeechView: View {
                 .padding()
             }
             .frame(minWidth: 430, maxWidth: 520)
+            .onAppear { ensureValidSpeechProvider() }
+            .onChange(of: app.settingsStore.settings.disabledProviders) { _, _ in
+                ensureValidSpeechProvider()
+            }
             .onChange(of: sp.provider) { _, _ in previewPath = nil }
 
             Divider()
@@ -190,6 +195,18 @@ struct SpeechView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
+        }
+    }
+
+    private var enabledSpeechProviders: [KeyProvider] {
+        KeyProvider.speechProviders.filter { app.isProviderEnabled($0) }
+    }
+
+    private func ensureValidSpeechProvider() {
+        let enabled = enabledSpeechProviders
+        guard !enabled.isEmpty else { return }
+        if !enabled.contains(where: { $0.rawValue == app.speech.provider }) {
+            app.speech.provider = enabled[0].rawValue
         }
     }
 }

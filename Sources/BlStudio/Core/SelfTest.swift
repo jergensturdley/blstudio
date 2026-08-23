@@ -171,6 +171,65 @@ enum SelfTest {
         let hexBytes = MiniMaxClient.hexToData("deadbeef")
         check("minimax hex audio decode", hexBytes == Data([0xde, 0xad, 0xbe, 0xef]))
 
+        // 7e. Cloudflare Workers AI image response decoding (base64 result.image).
+        let cfOK = """
+        {"result":{"image":"aGVsbG8="},"success":true,"errors":[],"messages":[]}
+        """
+        if let cf = try? JSONDecoder().decode(CloudflareImageResult.self, from: Data(cfOK.utf8)) {
+            let b64 = cf.result?.image
+            check("cloudflare image decode",
+                  cf.success == true && b64 == "aGVsbG8="
+                  && Data(base64Encoded: b64 ?? "") != nil)
+        } else {
+            check("cloudflare image decode", false)
+        }
+
+        // 7f. Hugging Face Inference Providers image decoding (url and b64_json).
+        let hfURL = """
+        {"data":[{"url":"https://cdn.example.com/out.png"}]}
+        """
+        if let hf = try? JSONDecoder().decode(HFImageResult.self, from: Data(hfURL.utf8)) {
+            check("huggingface image decode (url)",
+                  hf.data?.first?.url?.hasPrefix("https://") == true)
+        } else {
+            check("huggingface image decode (url)", false)
+        }
+        let hfB64 = """
+        {"data":[{"b64_json":"aGVsbG8="}]}
+        """
+        if let hf2 = try? JSONDecoder().decode(HFImageResult.self, from: Data(hfB64.utf8)) {
+            check("huggingface image decode (b64)",
+                  hf2.data?.first?.b64_json == "aGVsbG8=")
+        } else {
+            check("huggingface image decode (b64)", false)
+        }
+
+        // 7g. mmx CLI contracts: version comparison, video result, quota decode.
+        check("mmx version compare (newer)", MmxClient.versionAtLeast("1.0.22", "1.0.19"))
+        check("mmx version compare (equal)", MmxClient.versionAtLeast("1.0.19", "1.0.19"))
+        check("mmx version compare (older)", !MmxClient.versionAtLeast("1.0.16", "1.0.19"))
+        let mmxVid = """
+        {"task_id":"123","status":"Success","file_id":"456","saved":"/tmp/x.mp4","size":"1.2 MB"}
+        """
+        if let v = try? JSONDecoder().decode(MmxVideoResult.self, from: Data(mmxVid.utf8)) {
+            check("mmx video result decode",
+                  v.task_id == "123" && v.file_id == "456" && v.saved == "/tmp/x.mp4")
+        } else {
+            check("mmx video result decode", false)
+        }
+        let mmxQuota = """
+        {"model_remains":[{"model_name":"MiniMax-H3",
+          "current_interval_total_count":100,"current_interval_usage_count":20,
+          "current_interval_remaining_percent":80,"current_interval_status":1}]}
+        """
+        if let q = try? JSONDecoder().decode(MmxQuotaResponse.self, from: Data(mmxQuota.utf8)) {
+            let row = q.model_remains?.first
+            check("mmx quota decode",
+                  row?.model_name == "MiniMax-H3" && row?.current_interval_total_count == 100)
+        } else {
+            check("mmx quota decode", false)
+        }
+
         // 8. Live integration (only if bl is installed): dry-run + auth status
         let client = BLClient()
         if let _ = try? client.resolveBinary() {
@@ -197,6 +256,33 @@ enum SelfTest {
             }
         } else {
             print("SKIP  live bl integration (binary not found)")
+        }
+
+        // 9. Live mmx integration (only if mmx is installed): version + dry-run contract.
+        let mmx = MmxClient()
+        if let _ = try? mmx.resolveBinary() {
+            do {
+                let v = try await mmx.cliVersion()
+                check("mmx --version", !v.isEmpty)
+            } catch {
+                check("mmx --version (\(error.localizedDescription))", false)
+            }
+            do {
+                let out = try await mmx.run(arguments: [
+                    "video", "generate",
+                    "--model", MmxClient.h3Model,
+                    "--prompt", "selftest",
+                    "--dry-run", "--output", "json",
+                    "--region", "global", "--api-key", "***",
+                ], timeoutSeconds: 60)
+                check("mmx video generate --dry-run",
+                      out.exitCode == 0 && out.stdout.contains("MiniMax-H3")
+                      && out.stdout.contains("selftest"))
+            } catch {
+                check("mmx video generate --dry-run (\(error.localizedDescription))", false)
+            }
+        } else {
+            print("SKIP  live mmx integration (binary not found)")
         }
 
         print(failures == 0 ? "\nAll self-tests passed." : "\n\(failures) self-test(s) FAILED.")
