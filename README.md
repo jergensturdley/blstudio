@@ -5,9 +5,9 @@
 
 BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)). It drives Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps that CLI in a friendly GUI focused on:
 
-- **Image generation**. Prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible.
+- **Image generation**. Prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible. A dice button fills in a random seed, and the watermark is off by default.
 - **Image editing**. Drop source images, describe the edit, get results back.
-- **Easy prompting**. Saved favorite prompts, one-click style suffixes, quick chat with any Qwen text model (great for iterating on image prompts).
+- **Easy prompting**. Saved favorite prompts and saved negative prompts, one-click style suffixes, an Enhance-with-AI button that rewrites your prompt with a Qwen text model, and quick chat for iterating further.
 - **Image receiving**. Generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
 - **Quota tracking per API key**. Every request is logged locally per key (images, edits, chats, tokens, failures, daily chart). Account-level free-tier quotas and RPM/TPM rate limits are pulled from `bl usage free` / `bl quota check` when your console session is logged in.
 
@@ -58,7 +58,7 @@ The version embedded in `Info.plist` is derived from the tag (`v1.2.0` → `1.2.
 
 | Tab | What it does |
 | --- | --- |
-| **Generate** | Text-to-image via `bl image generate`. Pick a model, aspect ratio or pixel size, 1–6 images, optional seed/negative prompt, prompt-extend & watermark toggles. Style chips append curated suffixes to your prompt. |
+| **Generate** | Text-to-image via `bl image generate`. Pick a model, aspect ratio or pixel size, 1–6 images, optional seed/negative prompt, prompt-extend & watermark toggles (watermark defaults to off). Style chips append curated suffixes to your prompt; a dice button sets a random seed, and Enhance with AI rewrites your prompt. |
 | **Edit** | Image-to-image via `bl image edit`. Drag & drop or pick source images (local files or URLs), describe the change, optionally choose an edit function for `wanx*-imageedit` models. |
 | **Chat** | `bl text chat` with a transcript, system prompt, and per-reply token usage. Handy for prompt brainstorming. |
 | **Gallery** | History of every generation/edit with search & filters. Detail view offers Open/Copy/Reveal, **Use as edit source**, and **Describe** (runs `bl vision describe`). |

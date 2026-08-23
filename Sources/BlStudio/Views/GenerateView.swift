@@ -65,6 +65,18 @@ struct GenerateView: View {
                             }
                             .disabled(gen.prompt.trimmingCharacters(in: .whitespaces).isEmpty)
 
+                            Button {
+                                Task { await gen.enhancePrompt() }
+                            } label: {
+                                if gen.enhancing {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Label("Enhance with AI", systemImage: "wand.and.stars")
+                                }
+                            }
+                            .disabled(gen.prompt.trimmingCharacters(in: .whitespaces).isEmpty || gen.enhancing)
+                            .help("Ask the chat model to rewrite this prompt for better results")
+
                             Spacer()
                             Button("Clear") {
                                 gen.prompt = ""
@@ -73,6 +85,33 @@ struct GenerateView: View {
                             .disabled(gen.prompt.isEmpty)
                         }
                         .controlSize(.small)
+
+                        if let suggestion = gen.enhanceSuggestion {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("AI suggestion")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(suggestion)
+                                    .font(.callout)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
+                                HStack {
+                                    Button("Use suggestion") {
+                                        gen.prompt = suggestion
+                                        gen.enhanceSuggestion = nil
+                                    }
+                                    Button("Dismiss") { gen.enhanceSuggestion = nil }
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+
+                        if let err = gen.enhanceError {
+                            Text(err)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
                     }
 
                     Card(title: "Options") {
@@ -119,6 +158,13 @@ struct GenerateView: View {
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                 }
+                                Button {
+                                    gen.randomizeSeed()
+                                } label: {
+                                    Image(systemName: "dice")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Fill with a random seed")
                             }
                         }
                         LabeledContent("Negative prompt") {
@@ -126,6 +172,36 @@ struct GenerateView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .frame(maxWidth: 300)
                         }
+
+                        HStack(spacing: 8) {
+                            Button {
+                                prompts.toggleNegativeFavorite(gen.negativePrompt)
+                            } label: {
+                                Label(prompts.negativeFavorites.contains(gen.negativePrompt.trimmingCharacters(in: .whitespaces))
+                                      ? "Unsave negative" : "Save negative", systemImage: "ban")
+                            }
+                            .disabled(gen.negativePrompt.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                            if !prompts.negativeFavorites.isEmpty {
+                                Menu {
+                                    ForEach(prompts.negativeFavorites, id: \.self) { neg in
+                                        Button(neg.prefix(60).description) { gen.negativePrompt = neg }
+                                    }
+                                } label: {
+                                    Label("Saved (\(prompts.negativeFavorites.count))", systemImage: "ban")
+                                        .font(.caption)
+                                }
+                                .menuStyle(.borderlessButton)
+                                .fixedSize()
+                            }
+
+                            Spacer()
+
+                            Button("Clear") { gen.negativePrompt = "" }
+                                .disabled(gen.negativePrompt.isEmpty)
+                        }
+                        .controlSize(.small)
+
                         LabeledContent("Prompt extend") {
                             TriStatePicker(value: $gen.promptExtend)
                         }

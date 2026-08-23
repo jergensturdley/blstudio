@@ -115,7 +115,7 @@ final class GenerateModel {
     var seedEnabled = false
     var seedText: String = ""
     var promptExtend: Bool? = nil
-    var watermark: Bool? = nil
+    var watermark: Bool? = false
     var activePresets: Set<String> = []
 
     var phase: GenPhase = .idle
@@ -148,6 +148,63 @@ final class GenerateModel {
         prompt = prompt
             .replacingOccurrences(of: ", \(suffix)", with: "")
             .replacingOccurrences(of: suffix, with: "")
+    }
+
+    /// Fills the seed field with a random valid value and turns the seed on.
+    func randomizeSeed() {
+        seedText = String(Int.random(in: 0...2_147_483_647))
+        seedEnabled = true
+    }
+
+    // MARK: AI prompt assistance
+
+    var enhancing = false
+    var enhanceSuggestion: String?
+    var enhanceError: String?
+
+    private static let enhanceSystem = """
+    You are an expert at writing prompts for text-to-image models. \
+    Rewrite the user's idea into a clearer, more vivid, more detailed image prompt \
+    that preserves their subject and intent. Keep it to one to three sentences. \
+    Respond with only the improved prompt text. No preamble, no quotes, no explanation.
+    """
+
+    /// Asks the configured chat model to rewrite the current prompt into a
+    /// stronger image-generation prompt. The result is surfaced as a suggestion
+    /// (`enhanceSuggestion`) rather than applied automatically.
+    func enhancePrompt() async {
+        let current = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !current.isEmpty, !enhancing else { return }
+        enhancing = true
+        enhanceSuggestion = nil
+        enhanceError = nil
+        defer { enhancing = false }
+
+        let settings = app.settingsStore.settings
+        var req = ChatRequest(message: current)
+        req.model = settings.defaultChatModel.nonEmptyOrNil
+        req.system = Self.enhanceSystem
+        req.maxTokens = 500
+
+        let started = Date()
+        do {
+            let completion = try await app.client.textChat(req, apiKey: app.activeSecret)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            app.recordUsage(kind: .chat, model: req.model,
+                            promptTokens: completion.usage?.prompt_tokens ?? 0,
+                            completionTokens: completion.usage?.completion_tokens ?? 0,
+                            durationMs: ms, ok: true)
+            let improved = completion.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if improved.isEmpty {
+                enhanceError = "The model returned an empty suggestion."
+            } else {
+                enhanceSuggestion = improved
+            }
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            app.recordUsage(kind: .chat, model: req.model, durationMs: ms, ok: false)
+            enhanceError = error.localizedDescription
+        }
     }
 
     var canRun: Bool {
@@ -332,6 +389,12 @@ final class EditModel {
     func removeSource(_ url: URL) {
         url.stopAccessingSecurityScopedResource()
         sources.removeAll { $0 == url }
+    }
+
+    /// Fills the seed field with a random valid value and turns the seed on.
+    func randomizeSeed() {
+        seedText = String(Int.random(in: 0...2_147_483_647))
+        seedEnabled = true
     }
 
     func generate() async {

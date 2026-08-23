@@ -16,6 +16,7 @@ enum AppPaths {
     static var usageFile: URL { appSupport.appendingPathComponent("usage.jsonl") }
     static var historyFile: URL { appSupport.appendingPathComponent("history.json") }
     static var favoritesFile: URL { appSupport.appendingPathComponent("favorites.json") }
+    static var negativeFavoritesFile: URL { appSupport.appendingPathComponent("negative-favorites.json") }
 
     /// Default directory where generated images are stored.
     static var defaultImageLibrary: URL {
@@ -377,6 +378,7 @@ struct PromptPreset: Identifiable, Sendable {
 @Observable
 final class PromptLibrary {
     var favorites: [String] = []
+    var negativeFavorites: [String] = []
 
     static let presets: [PromptPreset] = [
         .init(name: "Photoreal", suffix: "photorealistic, ultra detailed, natural lighting, 8k"),
@@ -398,6 +400,10 @@ final class PromptLibrary {
            let decoded = try? JSONDecoder().decode([String].self, from: data) {
             favorites = decoded
         }
+        if let data = try? Data(contentsOf: AppPaths.negativeFavoritesFile),
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            negativeFavorites = decoded
+        }
     }
 
     func toggleFavorite(_ prompt: String) {
@@ -410,6 +416,24 @@ final class PromptLibrary {
             favorites = Array(favorites.prefix(50))
         }
         save()
+    }
+
+    func toggleNegativeFavorite(_ prompt: String) {
+        let p = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !p.isEmpty else { return }
+        if let i = negativeFavorites.firstIndex(of: p) {
+            negativeFavorites.remove(at: i)
+        } else {
+            negativeFavorites.insert(p, at: 0)
+            negativeFavorites = Array(negativeFavorites.prefix(50))
+        }
+        saveNegatives()
+    }
+
+    private func saveNegatives() {
+        if let data = try? JSONEncoder().encode(negativeFavorites) {
+            try? data.write(to: AppPaths.negativeFavoritesFile, options: .atomic)
+        }
     }
 
     private func save() {

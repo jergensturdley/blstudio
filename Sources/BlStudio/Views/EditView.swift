@@ -95,6 +95,13 @@ struct EditView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
+                                Button {
+                                    edit.randomizeSeed()
+                                } label: {
+                                    Image(systemName: "dice")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Fill with a random seed")
                             }
                         }
                         LabeledContent("Negative prompt") {
@@ -102,6 +109,35 @@ struct EditView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .frame(maxWidth: 300)
                         }
+
+                        HStack(spacing: 8) {
+                            Button {
+                                app.prompts.toggleNegativeFavorite(edit.negativePrompt)
+                            } label: {
+                                Label(app.prompts.negativeFavorites.contains(edit.negativePrompt.trimmingCharacters(in: .whitespaces))
+                                      ? "Unsave negative" : "Save negative", systemImage: "ban")
+                            }
+                            .disabled(edit.negativePrompt.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                            if !app.prompts.negativeFavorites.isEmpty {
+                                Menu {
+                                    ForEach(app.prompts.negativeFavorites, id: \.self) { neg in
+                                        Button(neg.prefix(60).description) { edit.negativePrompt = neg }
+                                    }
+                                } label: {
+                                    Label("Saved (\(app.prompts.negativeFavorites.count))", systemImage: "ban")
+                                        .font(.caption)
+                                }
+                                .menuStyle(.borderlessButton)
+                                .fixedSize()
+                            }
+
+                            Spacer()
+
+                            Button("Clear") { edit.negativePrompt = "" }
+                                .disabled(edit.negativePrompt.isEmpty)
+                        }
+                        .controlSize(.small)
                     }
 
                     HStack {
