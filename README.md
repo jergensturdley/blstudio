@@ -105,4 +105,5 @@ Tools/       icon generator, Info.plist template
 - The app is unsigned/local-only by design; no App Sandbox (it needs to spawn the `bl`/`node` process and write to your Pictures folder).
 - `usage free` / `quota check` reflect the active `bl` profile's console session, not arbitrary API keys. Per-key numbers come from the local ledger.
 - MiniMax `image-01` has no seed, negative-prompt, or watermark settings, so those controls are disabled when MiniMax is selected. MiniMax images are delivered as JPEG (1024px at the default resolution) and are logged to the same per-key usage ledger.
+- App Transport Security allows arbitrary loads because some image CDNs serve results over plain HTTP.
 - Video, speech, and other `bl` capabilities aren't wrapped yet. The Chat tab plus a terminal cover the rest.
