@@ -169,19 +169,40 @@ final class KeysStore {
         activeMeta?.label ?? "CLI default profile"
     }
 
-    func add(label: String, secret: String) throws -> APIKeyMeta {
+    func add(label: String, secret: String, provider: KeyProvider = .bailian) throws -> APIKeyMeta {
         let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 8 else {
             throw NSError(domain: "BlStudio", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "API key looks too short."])
         }
-        let meta = APIKeyMeta(label: label.isEmpty ? maskAPIKey(trimmed) : label,
+        var meta = APIKeyMeta(label: label.isEmpty ? maskAPIKey(trimmed) : label,
                               masked: maskAPIKey(trimmed))
+        meta.provider = provider
         try Keychain.setSecret(trimmed, account: meta.id.uuidString)
         keys.append(meta)
         if activeKeyId == nil { activeKeyId = meta.id }
         save()
         return meta
+    }
+
+    // MARK: MiniMax key resolution
+
+    var miniMaxConfigured: Bool { keys.contains { $0.isMiniMax } }
+
+    /// The MiniMax key to use: the globally active key when it is a MiniMax key,
+    /// otherwise the first MiniMax key in the list.
+    var activeMiniMaxMeta: APIKeyMeta? {
+        if let m = activeMeta, m.isMiniMax { return m }
+        return keys.first { $0.isMiniMax }
+    }
+
+    var activeMiniMaxSecret: String? {
+        guard let m = activeMiniMaxMeta else { return nil }
+        return Keychain.getSecret(account: m.id.uuidString)
+    }
+
+    func activeMiniMaxLabel() -> String {
+        activeMiniMaxMeta?.label ?? "No MiniMax key"
     }
 
     func updateLabel(_ id: UUID, label: String) {

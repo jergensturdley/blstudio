@@ -6,6 +6,7 @@
 BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)). It drives Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps that CLI in a friendly GUI focused on:
 
 - **Image generation**. Prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible. A dice button fills in a random seed, and the watermark is off by default.
+- **Two image providers**. Generate through Alibaba Bailian (via the `bl` CLI) or MiniMax (`image-01`, called over HTTP so no `bl` needed). Switch provider per generation. MiniMax returns up to 9 images in a single request and uses fixed aspect ratios.
 - **Image editing**. Drop source images, describe the edit, get results back.
 - **Easy prompting**. Saved favorite prompts and saved negative prompts, one-click style suffixes, an Enhance-with-AI button that rewrites your prompt with a Qwen text model, and quick chat for iterating further.
 - **Image receiving**. Generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
@@ -15,7 +16,7 @@ BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](
 
 - macOS 14+
 - Swift 6 toolchain (Xcode 16+ or Command Line Tools)
-- `bl` installed and authenticated (`bl auth login`), e.g. `npm i -g bailian-cli`
+- `bl` installed and authenticated (`bl auth login`), e.g. `npm i -g bailian-cli`. Required for the Bailian provider and for Chat/Edit/Quota; the MiniMax image provider works without `bl`.
 
 ## Build & run
 
@@ -58,12 +59,12 @@ The version embedded in `Info.plist` is derived from the tag (`v1.2.0` → `1.2.
 
 | Tab | What it does |
 | --- | --- |
-| **Generate** | Text-to-image via `bl image generate`. Pick a model, aspect ratio or pixel size, 1–6 images, optional seed/negative prompt, prompt-extend & watermark toggles (watermark defaults to off). Style chips append curated suffixes to your prompt; a dice button sets a random seed, and Enhance with AI rewrites your prompt. |
+| **Generate** | Text-to-image via the Bailian CLI or the MiniMax API. Pick a provider, then a model, aspect ratio or pixel size, and image count. Bailian supports 1–6 images with optional seed/negative prompt and prompt-extend & watermark toggles (watermark defaults to off). MiniMax returns 1–9 images per request with fixed aspect ratios. Style chips append curated suffixes to your prompt; a dice button sets a random seed, and Enhance with AI rewrites your prompt. |
 | **Edit** | Image-to-image via `bl image edit`. Drag & drop or pick source images (local files or URLs), describe the change, optionally choose an edit function for `wanx*-imageedit` models. |
 | **Chat** | `bl text chat` with a transcript, system prompt, and per-reply token usage. Handy for prompt brainstorming. |
 | **Gallery** | History of every generation/edit with search & filters. Detail view offers Open/Copy/Reveal, **Use as edit source**, and **Describe** (runs `bl vision describe`). |
 | **Quota** | Per-key local usage cards (images, edits, chats, tokens, 14-day chart) + account free-tier quota and rate-limit tables refreshed from the console. |
-| **API Keys** | Store multiple API keys in the macOS Keychain, select the active one, and test them. Without a selected key, BlStudio uses the active `bl` profile. |
+| **API Keys** | Store multiple API keys in the macOS Keychain, each tagged as Bailian or MiniMax, select the active one, and test them. Without a selected key, BlStudio uses the active `bl` profile. |
 | **Settings** | bl binary path override, image library folder, default size/models, timeouts. |
 
 The key selected in the toolbar is passed to `bl` as `--api-key` for image/chat/vision calls.
@@ -103,4 +104,5 @@ Tools/       icon generator, Info.plist template
 - Secrets live in the Keychain (`BlStudio` service); only masked prefixes are shown in the UI.
 - The app is unsigned/local-only by design; no App Sandbox (it needs to spawn the `bl`/`node` process and write to your Pictures folder).
 - `usage free` / `quota check` reflect the active `bl` profile's console session, not arbitrary API keys. Per-key numbers come from the local ledger.
+- MiniMax `image-01` has no seed, negative-prompt, or watermark settings, so those controls are disabled when MiniMax is selected. MiniMax images are delivered as JPEG (1024px at the default resolution) and are logged to the same per-key usage ledger.
 - Video, speech, and other `bl` capabilities aren't wrapped yet. The Chat tab plus a terminal cover the rest.

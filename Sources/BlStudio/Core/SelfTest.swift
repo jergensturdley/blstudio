@@ -98,6 +98,26 @@ enum SelfTest {
         do { _ = try parseSeed(enabled: true, text: "  ") } catch { emptySeedRejected = true }
         check("seed validation rejects empty", emptySeedRejected)
 
+        // 7c. MiniMax response decoding
+        let mmOK = """
+        {"base_resp":{"status_code":0,"status_msg":"success"},
+         "data":{"image_urls":["https://example.com/a.jpg","https://example.com/b.jpg"]}}
+        """
+        if let r = try? MiniMaxClient.decode(Data(mmOK.utf8)) {
+            check("minimax success decode",
+                  r.base_resp?.status_code == 0 && r.data?.image_urls?.count == 2)
+        } else {
+            check("minimax success decode", false)
+        }
+        let mmErr = """
+        {"base_resp":{"status_code":1004,"status_msg":"login fail"}}
+        """
+        if let r = try? MiniMaxClient.decode(Data(mmErr.utf8)) {
+            check("minimax error decode", r.base_resp?.status_code == 1004)
+        } else {
+            check("minimax error decode", false)
+        }
+
         // 8. Live integration (only if bl is installed): dry-run + auth status
         let client = BLClient()
         if let _ = try? client.resolveBinary() {

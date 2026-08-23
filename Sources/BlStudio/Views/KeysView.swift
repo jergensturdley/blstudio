@@ -5,6 +5,7 @@ struct KeysView: View {
 
     @State private var newLabel = ""
     @State private var newSecret = ""
+    @State private var newProvider: KeyProvider = .bailian
     @State private var errorMessage: String?
     @State private var testResult: [UUID: String] = [:]
     @State private var testing: UUID?
@@ -15,7 +16,7 @@ struct KeysView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Card(title: "API keys") {
-                    Text("Keys are stored in the macOS Keychain. The selected key is passed to bl via --api-key; when no key is selected, BlStudio uses the active bl CLI profile.")
+                    Text("Keys are stored in the macOS Keychain. Bailian keys are passed to bl via --api-key; when none is selected, BlStudio uses the active bl CLI profile. MiniMax keys are used directly for MiniMax image generation.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -34,7 +35,14 @@ struct KeysView: View {
                                   ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(keys.activeKeyId == key.id ? Color.accentColor : .secondary)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(key.label).font(.callout.bold())
+                                HStack(spacing: 6) {
+                                    Text(key.label).font(.callout.bold())
+                                    Text(key.resolvedProvider.label)
+                                        .font(.caption2)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(key.isMiniMax ? Color.purple.opacity(0.18) : Color.accentColor.opacity(0.14)))
+                                }
                                 Text("\(key.masked) · added \(Fmt.shortDate.string(from: key.createdAt))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -86,8 +94,19 @@ struct KeysView: View {
                         }
                         GridRow {
                             Text("API key").foregroundStyle(.secondary)
-                            SecureField("sk-…", text: $newSecret)
+                            SecureField(newProvider == .minimax ? "eyJ…" : "sk-…", text: $newSecret)
                                 .textFieldStyle(.roundedBorder)
+                        }
+                        GridRow {
+                            Text("Provider").foregroundStyle(.secondary)
+                            Picker("", selection: $newProvider) {
+                                ForEach(KeyProvider.allCases, id: \.self) { p in
+                                    Text(p.label).tag(p)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .frame(maxWidth: 300, alignment: .leading)
                         }
                     }
                     HStack {
@@ -151,15 +170,17 @@ struct KeysView: View {
     private func addKey() {
         errorMessage = nil
         do {
-            _ = try app.keysStore.add(label: newLabel, secret: newSecret)
+            _ = try app.keysStore.add(label: newLabel, secret: newSecret, provider: newProvider)
             newLabel = ""
             newSecret = ""
+            newProvider = .bailian
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    /// Sends the smallest possible chat request with this key to verify it works.
+    /// Verifies a key with the smallest possible request. Bailian keys send a
+    /// one-token chat ping; MiniMax keys hit a free file-retrieve endpoint.
     private func testKey(_ key: APIKeyMeta) async {
         testing = key.id
         testResult[key.id] = nil
@@ -169,10 +190,15 @@ struct KeysView: View {
             return
         }
         do {
-            var req = ChatRequest(message: "ping")
-            req.maxTokens = 1
-            let completion = try await app.client.textChat(req, apiKey: secret, timeoutSeconds: 60)
-            testResult[key.id] = "OK · \(completion.model ?? "model")"
+            if key.isMiniMax {
+                let msg = try await app.minimax.validate(apiKey: secret)
+                testResult[key.id] = msg
+            } else {
+                var req = ChatRequest(message: "ping")
+                req.maxTokens = 1
+                let completion = try await app.client.textChat(req, apiKey: secret, timeoutSeconds: 60)
+                testResult[key.id] = "OK · \(completion.model ?? "model")"
+            }
         } catch {
             testResult[key.id] = String(error.localizedDescription.prefix(80))
         }

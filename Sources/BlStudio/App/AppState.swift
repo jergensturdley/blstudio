@@ -7,6 +7,7 @@ import Observation
 @Observable
 final class AppState {
     let client = BLClient()
+    let minimax = MiniMaxClient()
     @ObservationIgnored let settingsStore = SettingsStore()
     @ObservationIgnored let keysStore = KeysStore()
     @ObservationIgnored let ledger = UsageLedger()
@@ -47,11 +48,17 @@ final class AppState {
     var activeKeyId: UUID? { keysStore.activeKeyId }
     var activeKeyLabel: String { keysStore.activeLabel() }
 
+    /// MiniMax key resolution (independent of the Bailian active key).
+    var miniMaxConfigured: Bool { keysStore.miniMaxConfigured }
+    var miniMaxSecret: String? { keysStore.activeMiniMaxSecret }
+    var miniMaxKeyId: UUID? { keysStore.activeMiniMaxMeta?.id }
+    var miniMaxKeyLabel: String { keysStore.activeMiniMaxLabel() }
+
     func recordUsage(kind: WorkKind, model: String?, images: Int = 0,
                      promptTokens: Int = 0, completionTokens: Int = 0,
-                     durationMs: Int, ok: Bool) {
+                     durationMs: Int, ok: Bool, keyIdOverride: UUID? = nil) {
         ledger.record(UsageEvent(
-            keyId: keysStore.activeKeyId,
+            keyId: keyIdOverride ?? keysStore.activeKeyId,
             kind: kind, model: model, at: Date(),
             images: images, promptTokens: promptTokens,
             completionTokens: completionTokens,
@@ -116,6 +123,8 @@ final class GenerateModel {
     var seedText: String = ""
     var promptExtend: Bool? = nil
     var watermark: Bool? = false
+    /// Which backend generates images: "bailian" (bl CLI) or "minimax" (native HTTP).
+    var provider: String = KeyProvider.bailian.rawValue
     var activePresets: Set<String> = []
 
     var phase: GenPhase = .idle
@@ -211,7 +220,13 @@ final class GenerateModel {
         !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && phase != .running
     }
 
+    var isMiniMax: Bool { provider == KeyProvider.minimax.rawValue }
+
     func generate() async {
+        if isMiniMax {
+            await generateMiniMax()
+            return
+        }
         guard canRun else { return }
 
         let seedValue: Int?
@@ -278,6 +293,69 @@ final class GenerateModel {
             app.history.add(HistoryEntry(
                 kind: .imageGenerate, prompt: composedPrompt, model: req.model,
                 keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    /// Generates images through the MiniMax HTTP API directly (no `bl` CLI).
+    /// MiniMax supports a native batch of up to 9 images per request, so no
+    /// fan-out is needed. Seed, negative prompt, and watermark are not part of
+    /// the MiniMax API and are ignored here.
+    private func generateMiniMax() async {
+        guard canRun else { return }
+        guard let apiKey = app.miniMaxSecret else {
+            phase = .failed("No MiniMax API key configured. Add one in the API Keys tab and set its provider to MiniMax.")
+            return
+        }
+
+        let ratio = ModelCatalog.minimaxAspectRatios.contains(size) ? size : "1:1"
+        let modelUsed = model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "image-01" : model
+        let displayModel = "MiniMax \(modelUsed)"
+        let promptText = composedPrompt
+
+        phase = .running
+        progressLine = "Contacting MiniMax…"
+        lastResult = nil
+        lastSavedPaths = []
+
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let prefix = AppState.outPrefix(for: prompt, kind: "img")
+        let started = Date()
+
+        do {
+            let urls = try await app.minimax.generate(
+                apiKey: apiKey,
+                prompt: promptText,
+                n: count,
+                aspectRatio: ratio,
+                promptOptimizer: promptExtend ?? true,
+                model: modelUsed)
+            var saved: [String] = []
+            for (i, u) in urls.enumerated() {
+                progressLine = "Downloading image \(i + 1)/\(urls.count)…"
+                let dest = try await app.minimax.downloadImage(u, to: outDir, prefix: prefix, index: i + 1)
+                saved.append(dest.path)
+            }
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPaths = saved
+            phase = .done
+            app.recordUsage(kind: .imageGenerate, model: displayModel, images: saved.count,
+                            durationMs: ms, ok: true, keyIdOverride: app.miniMaxKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
+                savedPaths: saved, remoteUrls: urls,
+                taskId: nil, durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .imageGenerate, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: app.miniMaxKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
                 savedPaths: [], remoteUrls: [], taskId: nil,
                 durationMs: ms, ok: false, detail: error.localizedDescription))
         }

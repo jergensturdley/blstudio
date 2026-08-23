@@ -198,10 +198,28 @@ struct UsageDayPoint: Identifiable, Sendable {
     var id: Date { day }
 }
 
+/// Which backend an API key belongs to.
+enum KeyProvider: String, Codable, Sendable, CaseIterable {
+    case bailian = "bailian"
+    case minimax = "minimax"
+
+    var label: String {
+        switch self {
+        case .bailian: return "Bailian (bl)"
+        case .minimax: return "MiniMax"
+        }
+    }
+}
+
 struct APIKeyMeta: Codable, Identifiable, Sendable {
     var id: UUID = UUID()
     var label: String
     var masked: String
     var baseUrl: String?
     var createdAt: Date = Date()
+    /// Nil for keys saved before providers existed. Treated as Bailian.
+    var provider: KeyProvider?
+
+    var resolvedProvider: KeyProvider { provider ?? .bailian }
+    var isMiniMax: Bool { resolvedProvider == .minimax }
 }

@@ -115,32 +115,66 @@ struct GenerateView: View {
                     }
 
                     Card(title: "Options") {
+                        LabeledContent("Provider") {
+                            Picker("", selection: $gen.provider) {
+                                Text("Bailian (bl)").tag(KeyProvider.bailian.rawValue)
+                                Text("MiniMax").tag(KeyProvider.minimax.rawValue)
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .frame(maxWidth: 300)
+                        }
+
+                        if gen.isMiniMax {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("MiniMax supports 1–9 images per request and fixed aspect ratios. Seed, negative prompt, and watermark are not available.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if !app.miniMaxConfigured {
+                                    Text("No MiniMax key yet. Add one in the API Keys tab with provider MiniMax.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                        }
+
                         LabeledContent("Model") {
                             SuggestingField(title: "Model", text: $gen.model,
-                                            suggestions: ModelCatalog.imageModels)
+                                            suggestions: gen.isMiniMax ? ModelCatalog.minimaxImageModels : ModelCatalog.imageModels)
                                 .frame(maxWidth: 300)
                         }
                         LabeledContent("Size") {
-                            HStack {
+                            if gen.isMiniMax {
                                 Picker("", selection: $gen.size) {
-                                    ForEach(ModelCatalog.sizes, id: \.self) { Text($0).tag($0) }
+                                    ForEach(ModelCatalog.minimaxAspectRatios, id: \.self) { Text($0).tag($0) }
                                 }
-                                .pickerStyle(.segmented)
+                                .pickerStyle(.menu)
                                 .labelsHidden()
-                                if gen.size == "custom" {
-                                    TextField("e.g. 2048*2048", text: $gen.customSize)
-                                        .textFieldStyle(.roundedBorder)
-                                        .frame(width: 120)
+                                .frame(maxWidth: 300)
+                            } else {
+                                HStack {
+                                    Picker("", selection: $gen.size) {
+                                        ForEach(ModelCatalog.sizes, id: \.self) { Text($0).tag($0) }
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .labelsHidden()
+                                    if gen.size == "custom" {
+                                        TextField("e.g. 2048*2048", text: $gen.customSize)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 120)
+                                    }
                                 }
+                                .frame(maxWidth: 420)
                             }
-                            .frame(maxWidth: 420)
                         }
                         LabeledContent("Images") {
                             VStack(alignment: .leading, spacing: 2) {
-                                Stepper("\(gen.count)", value: $gen.count, in: 1...6)
+                                Stepper("\(gen.count)", value: $gen.count, in: gen.isMiniMax ? 1...9 : 1...6)
                                     .fixedSize()
                                 if gen.count > 1 {
-                                    Text("Runs \(gen.count) parallel single-image requests (works with every model).")
+                                    Text(gen.isMiniMax
+                                         ? "MiniMax returns \(gen.count) images in one request."
+                                         : "Runs \(gen.count) parallel single-image requests (works with every model).")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -167,6 +201,7 @@ struct GenerateView: View {
                                 .help("Fill with a random seed")
                             }
                         }
+                        .disabled(gen.isMiniMax)
                         LabeledContent("Negative prompt") {
                             TextField("things to avoid", text: $gen.negativePrompt)
                                 .textFieldStyle(.roundedBorder)
@@ -201,6 +236,7 @@ struct GenerateView: View {
                                 .disabled(gen.negativePrompt.isEmpty)
                         }
                         .controlSize(.small)
+                        .disabled(gen.isMiniMax)
 
                         LabeledContent("Prompt extend") {
                             TriStatePicker(value: $gen.promptExtend)
@@ -208,6 +244,7 @@ struct GenerateView: View {
                         LabeledContent("Watermark") {
                             TriStatePicker(value: $gen.watermark)
                         }
+                        .disabled(gen.isMiniMax)
                     }
 
                     HStack {
@@ -233,6 +270,14 @@ struct GenerateView: View {
                 .padding()
             }
             .frame(minWidth: 430, maxWidth: 520)
+            .onChange(of: gen.provider) { _, _ in
+                if gen.isMiniMax {
+                    if !ModelCatalog.minimaxAspectRatios.contains(gen.size) { gen.size = "1:1" }
+                    if gen.count > 9 { gen.count = 9 }
+                } else {
+                    if gen.count > 6 { gen.count = 6 }
+                }
+            }
 
             Divider()
 

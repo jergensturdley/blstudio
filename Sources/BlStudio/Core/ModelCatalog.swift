@@ -29,6 +29,17 @@ enum ModelCatalog {
 
     static let sizes = ["1:1", "3:4", "4:3", "16:9", "9:16", "custom"]
 
+    // MARK: MiniMax
+
+    static let minimaxImageModels = [
+        "image-01",
+    ]
+
+    /// Aspect ratios accepted by MiniMax image-01.
+    static let minimaxAspectRatios = [
+        "1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9",
+    ]
+
     static let editFunctions = [
         "description_edit",
         "stylization_all",
