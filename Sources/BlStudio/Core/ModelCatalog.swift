@@ -109,6 +109,41 @@ enum ModelCatalog {
         }
     }
 
+    // MARK: Music
+
+    /// MiniMax music models.
+    static let musicModels = [
+        "music-2.0",
+        "music-1.5",
+    ]
+
+    // MARK: Speech (text-to-audio)
+
+    /// MiniMax speech models.
+    static let speechModels = [
+        "speech-2.8-hd",
+        "speech-02-hd",
+        "speech-02-turbo",
+    ]
+
+    /// A practical set of MiniMax system voice ids.
+    static let ttsVoices = [
+        "female-shaonv",
+        "female-yujie",
+        "female-chengshu",
+        "female-tianmei",
+        "president_male",
+        "male-qn-qingse",
+        "audiobook_female_1",
+        "audiobook_male_1",
+        "cute_boy",
+        "Charming_Lady",
+    ]
+
+    static let ttsEmotions = [
+        "happy", "sad", "angry", "fearful", "disgusted", "surprised", "neutral",
+    ]
+
     static let editFunctions = [
         "description_edit",
         "stylization_all",

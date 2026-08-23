@@ -225,6 +225,26 @@ final class KeysStore {
         activeGeminiMeta?.label ?? "No Gemini key"
     }
 
+    // MARK: Fish Audio key resolution
+
+    var fishConfigured: Bool { keys.contains { $0.isFish } }
+
+    /// The Fish Audio key to use: the globally active key when it is a Fish key,
+    /// otherwise the first Fish key in the list.
+    var activeFishMeta: APIKeyMeta? {
+        if let m = activeMeta, m.isFish { return m }
+        return keys.first { $0.isFish }
+    }
+
+    var activeFishSecret: String? {
+        guard let m = activeFishMeta else { return nil }
+        return Keychain.getSecret(account: m.id.uuidString)
+    }
+
+    func activeFishLabel() -> String {
+        activeFishMeta?.label ?? "No Fish Audio key"
+    }
+
     func updateLabel(_ id: UUID, label: String) {
         guard let i = keys.firstIndex(where: { $0.id == id }) else { return }
         keys[i].label = label
@@ -304,6 +324,8 @@ final class UsageLedger {
         var images = 0
         var edits = 0
         var videos = 0
+        var music = 0
+        var audio = 0
         var chats = 0
         var promptTokens = 0
         var completionTokens = 0
@@ -324,6 +346,8 @@ final class UsageLedger {
             case .imageGenerate: s.images += e.images
             case .imageEdit: s.edits += e.images
             case .videoGenerate: s.videos += 1
+            case .musicGenerate: s.music += 1
+            case .speech: s.audio += 1
             case .chat: s.chats += 1
             case .vision: s.chats += 0
             }

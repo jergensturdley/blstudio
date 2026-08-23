@@ -187,6 +187,127 @@ final class MiniMaxClient: @unchecked Sendable {
         return dest
     }
 
+    // MARK: Music
+
+    /// Generates a song synchronously via POST /v1/music_generation.
+    /// `dest` is where the mp3 is written; returns the saved file.
+    func musicGenerate(
+        apiKey: String,
+        model: String,
+        prompt: String,
+        lyrics: String? = nil,
+        dest: URL
+    ) async throws -> URL {
+        guard let url = URL(string: "\(baseURL)/v1/music_generation") else { throw MiniMaxError.badURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 300
+        var body: [String: Any] = [
+            "model": model,
+            "prompt": prompt,
+            "audio_setting": ["sample_rate": 44100, "bitrate": 256000, "format": "mp3", "channel": 2],
+            "output_format": "url",
+        ]
+        if let lyrics = lyrics?.trimmingCharacters(in: .whitespacesAndNewlines), !lyrics.isEmpty {
+            body["lyrics"] = lyrics
+        }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw MiniMaxError.badResponse("no HTTP response") }
+
+        let text = String(data: data, encoding: .utf8) ?? ""
+        guard http.statusCode == 200 else { throw MiniMaxError.http(http.statusCode, String(text.prefix(200))) }
+        let decoded = try JSONDecoder().decode(MiniMaxAudioResult.self, from: data)
+        if let br = decoded.base_resp, br.status_code != 0 {
+            throw MiniMaxError.api(status: br.status_code, message: br.status_msg ?? "unknown error")
+        }
+        guard let audio = decoded.data?.audio, !audio.isEmpty else {
+            throw MiniMaxError.badResponse("no audio returned")
+        }
+        return try await saveMiniMaxAudio(audio, to: dest)
+    }
+
+    // MARK: Speech (text-to-audio)
+
+    /// Converts text to speech synchronously via POST /v1/t2a_v2.
+    /// `dest` is where the audio file is written; returns the saved file.
+    func speechGenerate(
+        apiKey: String,
+        model: String,
+        text: String,
+        voiceId: String,
+        speed: Double,
+        emotion: String,
+        dest: URL
+    ) async throws -> URL {
+        guard let url = URL(string: "\(baseURL)/v1/t2a_v2") else { throw MiniMaxError.badURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 180
+        let body: [String: Any] = [
+            "model": model,
+            "text": text,
+            "voice_setting": [
+                "voice_id": voiceId,
+                "speed": speed,
+                "vol": 1.0,
+                "pitch": 0,
+                "emotion": emotion,
+            ],
+            "audio_setting": ["sample_rate": 32000, "bitrate": 128000, "format": "mp3", "channel": 1],
+            "language_boost": "auto",
+            "output_format": "url",
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw MiniMaxError.badResponse("no HTTP response") }
+
+        let text = String(data: data, encoding: .utf8) ?? ""
+        guard http.statusCode == 200 else { throw MiniMaxError.http(http.statusCode, String(text.prefix(200))) }
+        let decoded = try JSONDecoder().decode(MiniMaxAudioResult.self, from: data)
+        if let br = decoded.base_resp, br.status_code != 0 {
+            throw MiniMaxError.api(status: br.status_code, message: br.status_msg ?? "unknown error")
+        }
+        guard let audio = decoded.data?.audio, !audio.isEmpty else {
+            throw MiniMaxError.badResponse("no audio returned")
+        }
+        return try await saveMiniMaxAudio(audio, to: dest)
+    }
+
+    /// Saves a MiniMax audio payload. With `output_format: "url"` the value is a
+    /// downloadable URL; otherwise MiniMax returns the audio hex-encoded.
+    private func saveMiniMaxAudio(_ audio: String, to dest: URL) async throws -> URL {
+        let trimmed = audio.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.lowercased().hasPrefix("http") {
+            return try await downloadVideo(trimmed, to: dest)
+        }
+        guard let bytes = Self.hexToData(trimmed) else {
+            throw MiniMaxError.badResponse("could not decode audio payload")
+        }
+        try? FileManager.default.removeItem(at: dest)
+        try bytes.write(to: dest)
+        return dest
+    }
+
+    static func hexToData(_ hex: String) -> Data? {
+        guard hex.count % 2 == 0 else { return nil }
+        var data = Data(capacity: hex.count / 2)
+        var idx = hex.startIndex
+        while idx < hex.endIndex {
+            guard let next = hex.index(idx, offsetBy: 2, limitedBy: hex.endIndex),
+                  let byte = UInt8(hex[idx..<next], radix: 16) else { return nil }
+            data.append(byte)
+            idx = next
+        }
+        return data
+    }
+
     /// Submits a video task, polls until it finishes, then downloads it to `dest`.
     /// `Task.sleep` propagates cancellation, so wrapping this in a cancellable
     /// task gives cancel support.
@@ -261,6 +382,18 @@ struct MiniMaxFileRetrieve: Codable, Sendable {
 /// Generic envelope used where only `base_resp` matters.
 struct MiniMaxBaseEnvelope: Codable, Sendable {
     var base_resp: MiniMaxImageResult.BaseResp?
+}
+
+/// Response envelope for /v1/music_generation and /v1/t2a_v2.
+/// `data.audio` is a URL when `output_format: "url"` was requested,
+/// otherwise the raw audio hex-encoded.
+struct MiniMaxAudioResult: Codable, Sendable {
+    struct Payload: Codable, Sendable {
+        var audio: String?
+        var extra_info: String?
+    }
+    var base_resp: MiniMaxImageResult.BaseResp?
+    var data: Payload?
 }
 
 /// Response envelope for /v1/image_generation.

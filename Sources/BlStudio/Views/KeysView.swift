@@ -14,6 +14,7 @@ struct KeysView: View {
         switch newProvider {
         case .minimax: return "eyJ…"
         case .gemini: return "AIza…"
+        case .fish: return "Fish Audio API key"
         default: return "sk-…"
         }
     }
@@ -203,6 +204,9 @@ struct KeysView: View {
                 testResult[key.id] = msg
             } else if key.isGemini {
                 let msg = try await app.gemini.validate(apiKey: secret)
+                testResult[key.id] = msg
+            } else if key.isFish {
+                let msg = try await app.fish.validate(apiKey: secret)
                 testResult[key.id] = msg
             } else {
                 var req = ChatRequest(message: "ping")

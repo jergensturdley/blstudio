@@ -56,6 +56,8 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     case generate = "Generate"
     case edit = "Edit"
     case video = "Video"
+    case music = "Music"
+    case speech = "Speech"
     case chat = "Chat"
     case gallery = "Gallery"
     case quota = "Quota"
@@ -69,6 +71,8 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .generate: return "photo.badge.plus"
         case .edit: return "wand.and.stars"
         case .video: return "film"
+        case .music: return "music.note"
+        case .speech: return "waveform"
         case .chat: return "bubble.left.and.bubble.right"
         case .gallery: return "rectangle.grid.2x2"
         case .quota: return "gauge.with.dots.needle.67percent"
@@ -97,6 +101,8 @@ struct RootView: View {
             case .generate: GenerateView()
             case .edit: EditView()
             case .video: VideoView()
+            case .music: MusicView()
+            case .speech: SpeechView()
             case .chat: ChatView()
             case .gallery: GalleryView()
             case .quota: QuotaView()

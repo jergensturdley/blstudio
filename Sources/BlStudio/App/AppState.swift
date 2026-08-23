@@ -10,6 +10,7 @@ final class AppState {
     let minimax = MiniMaxClient()
     let pollinations = PollinationsClient()
     let gemini = GeminiClient()
+    let fish = FishClient()
     @ObservationIgnored let settingsStore = SettingsStore()
     @ObservationIgnored let keysStore = KeysStore()
     @ObservationIgnored let ledger = UsageLedger()
@@ -25,6 +26,8 @@ final class AppState {
     @ObservationIgnored var edit: EditModel!
     @ObservationIgnored var chat: ChatModel!
     @ObservationIgnored var video: VideoModel!
+    @ObservationIgnored var music: MusicModel!
+    @ObservationIgnored var speech: SpeechModel!
     @ObservationIgnored var quota: QuotaModel!
 
     init() {
@@ -33,6 +36,8 @@ final class AppState {
         edit = EditModel(app: self)
         chat = ChatModel(app: self)
         video = VideoModel(app: self)
+        music = MusicModel(app: self)
+        speech = SpeechModel(app: self)
         quota = QuotaModel(app: self)
     }
 
@@ -63,6 +68,12 @@ final class AppState {
     var geminiSecret: String? { keysStore.activeGeminiSecret }
     var geminiKeyId: UUID? { keysStore.activeGeminiMeta?.id }
     var geminiKeyLabel: String { keysStore.activeGeminiLabel() }
+
+    /// Fish Audio key resolution (independent of the Bailian active key).
+    var fishConfigured: Bool { keysStore.fishConfigured }
+    var fishSecret: String? { keysStore.activeFishSecret }
+    var fishKeyId: UUID? { keysStore.activeFishMeta?.id }
+    var fishKeyLabel: String { keysStore.activeFishLabel() }
 
     func recordUsage(kind: WorkKind, model: String?, images: Int = 0,
                      promptTokens: Int = 0, completionTokens: Int = 0,
@@ -947,6 +958,203 @@ final class VideoModel {
             app.history.add(HistoryEntry(
                 kind: .videoGenerate, prompt: promptText, model: displayModel,
                 keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+}
+
+// MARK: - Music
+
+@MainActor
+@Observable
+final class MusicModel {
+    @ObservationIgnored unowned let app: AppState
+
+    var prompt: String = ""
+    var lyrics: String = ""
+    var model: String = "music-2.0"
+
+    var phase: GenPhase = .idle
+    var progressLine: String = ""
+    var lastSavedPath: String? = nil
+
+    init(app: AppState) { self.app = app }
+
+    var canRun: Bool {
+        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && phase != .running
+    }
+
+    func generate() async {
+        guard canRun else { return }
+        guard let apiKey = app.miniMaxSecret else {
+            phase = .failed("No MiniMax API key configured. Add one in the API Keys tab and set its provider to MiniMax.")
+            return
+        }
+
+        phase = .running
+        progressLine = "Composing with MiniMax…"
+        lastSavedPath = nil
+
+        let promptText = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let dest = outDir.appendingPathComponent("\(AppState.outPrefix(for: prompt, kind: "mus")).mp3")
+        let effectiveModel = model.trimmingCharacters(in: .whitespaces).isEmpty ? "music-2.0" : model
+        let displayModel = "MiniMax \(effectiveModel)"
+
+        let started = Date()
+        do {
+            let saved = try await app.minimax.musicGenerate(
+                apiKey: apiKey, model: effectiveModel, prompt: promptText,
+                lyrics: lyrics.nonEmptyOrNil, dest: dest)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPath = saved.path
+            phase = .done
+            app.recordUsage(kind: .musicGenerate, model: displayModel,
+                            durationMs: ms, ok: true, keyIdOverride: app.miniMaxKeyId)
+            app.history.add(HistoryEntry(
+                kind: .musicGenerate, prompt: promptText, model: displayModel,
+                keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
+                savedPaths: [saved.path], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .musicGenerate, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: app.miniMaxKeyId)
+            app.history.add(HistoryEntry(
+                kind: .musicGenerate, prompt: promptText, model: displayModel,
+                keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+}
+
+// MARK: - Speech
+
+@MainActor
+@Observable
+final class SpeechModel {
+    @ObservationIgnored unowned let app: AppState
+
+    /// "minimax" or "fish".
+    var provider: String = KeyProvider.minimax.rawValue
+    var text: String = ""
+    // MiniMax settings
+    var model: String = "speech-2.8-hd"
+    var voice: String = "female-shaonv"
+    var speed: Double = 1.0
+    var emotion: String = "happy"
+    // Fish Audio settings
+    var referenceId: String = ""
+
+    var phase: GenPhase = .idle
+    var progressLine: String = ""
+    var lastSavedPath: String? = nil
+
+    init(app: AppState) { self.app = app }
+
+    var isFish: Bool { provider == KeyProvider.fish.rawValue }
+
+    var canRun: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && phase != .running
+    }
+
+    func generate() async {
+        if isFish {
+            await generateFish()
+        } else {
+            await generateMiniMax()
+        }
+    }
+
+    private func generateMiniMax() async {
+        guard canRun else { return }
+        guard let apiKey = app.miniMaxSecret else {
+            phase = .failed("No MiniMax API key configured. Add one in the API Keys tab and set its provider to MiniMax.")
+            return
+        }
+
+        phase = .running
+        progressLine = "Synthesizing speech with MiniMax…"
+        lastSavedPath = nil
+
+        let textContent = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let dest = outDir.appendingPathComponent("\(AppState.outPrefix(for: text, kind: "sp")).mp3")
+        let displayModel = "MiniMax \(model)"
+
+        let started = Date()
+        do {
+            let saved = try await app.minimax.speechGenerate(
+                apiKey: apiKey, model: model, text: textContent,
+                voiceId: voice, speed: speed, emotion: emotion, dest: dest)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPath = saved.path
+            phase = .done
+            app.recordUsage(kind: .speech, model: displayModel,
+                            durationMs: ms, ok: true, keyIdOverride: app.miniMaxKeyId)
+            app.history.add(HistoryEntry(
+                kind: .speech, prompt: textContent, model: displayModel,
+                keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
+                savedPaths: [saved.path], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .speech, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: app.miniMaxKeyId)
+            app.history.add(HistoryEntry(
+                kind: .speech, prompt: textContent, model: displayModel,
+                keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    private func generateFish() async {
+        guard canRun else { return }
+        guard let apiKey = app.fishSecret else {
+            phase = .failed("No Fish Audio API key configured. Add one in the API Keys tab and set its provider to Fish Audio.")
+            return
+        }
+
+        phase = .running
+        progressLine = "Synthesizing speech with Fish Audio…"
+        lastSavedPath = nil
+
+        let textContent = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let dest = outDir.appendingPathComponent("\(AppState.outPrefix(for: text, kind: "sp")).mp3")
+        let displayModel = "Fish Audio"
+
+        let started = Date()
+        do {
+            let saved = try await app.fish.tts(
+                apiKey: apiKey, text: textContent,
+                referenceId: referenceId.nonEmptyOrNil, dest: dest)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPath = saved.path
+            phase = .done
+            app.recordUsage(kind: .speech, model: displayModel,
+                            durationMs: ms, ok: true, keyIdOverride: app.fishKeyId)
+            app.history.add(HistoryEntry(
+                kind: .speech, prompt: textContent, model: displayModel,
+                keyId: app.fishKeyId, keyLabel: app.fishKeyLabel,
+                savedPaths: [saved.path], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .speech, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: app.fishKeyId)
+            app.history.add(HistoryEntry(
+                kind: .speech, prompt: textContent, model: displayModel,
+                keyId: app.fishKeyId, keyLabel: app.fishKeyLabel,
                 savedPaths: [], remoteUrls: [], taskId: nil,
                 durationMs: ms, ok: false, detail: error.localizedDescription))
         }

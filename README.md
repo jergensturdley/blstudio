@@ -6,10 +6,12 @@
 BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)). It drives Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps that CLI in a friendly GUI focused on:
 
 - **Image generation**. Prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible. A dice button fills in a random seed, and the watermark is off by default.
-- **Multiple providers**. Images through Alibaba Bailian (via the `bl` CLI), MiniMax, Pollinations (free, no API key), or Google Gemini (free AI Studio key); video through Bailian and MiniMax Hailuo. Switch provider per job. MiniMax returns up to 9 images in a single request with fixed aspect ratios, and renders video with its Hailuo models.
+- **Multiple providers**. Images through Alibaba Bailian (via the `bl` CLI), MiniMax, Pollinations (free, no API key), or Google Gemini (free AI Studio key); video through Bailian and MiniMax Hailuo; music and speech through MiniMax, plus speech through Fish Audio. Switch provider per job. MiniMax returns up to 9 images in a single request with fixed aspect ratios, and renders video with its Hailuo models.
 - **Free image generation**. Pollinations needs no key at all, and Gemini's `gemini-2.5-flash-image` ("Nano Banana") runs on a free Google AI Studio key, so you can generate without a paid account.
 - **Image editing**. Drop source images, describe the edit, get results back.
 - **Video generation**. Text-to-video and image-to-video through Bailian (`bl video generate`) or MiniMax Hailuo, with resolution, aspect ratio, duration, and seed controls, live progress, an inline player, and results saved to your library folder.
+- **Music generation**. Compose full songs (with optional lyrics) using MiniMax `music-2.0` / `music-1.5`, then play them inline.
+- **Speech / text-to-audio**. Turn text into speech through MiniMax (`speech-2.8-hd` with voice, speed, and emotion controls) or Fish Audio (streams the audio back directly, with an optional reference voice). Generated audio plays inline with a scrubber.
 - **Easy prompting**. Saved favorite prompts and saved negative prompts, one-click style suffixes, an Enhance-with-AI button that rewrites your prompt with a Qwen text model, and quick chat for iterating further.
 - **Image receiving**. Generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
 - **In-app image viewer**. Click any image to open it full-size inside BlStudio, no Preview needed. Pinch or use the zoom buttons to magnify (up to 8×), drag to pan, double-click to toggle fit/2×, and flip through batches with the arrows. Open, Reveal, Copy, Describe, and send-to-Edit are all in the viewer bar.
@@ -65,10 +67,12 @@ The version embedded in `Info.plist` is derived from the tag (`v1.2.0` → `1.2.
 | **Generate** | Text-to-image via Bailian CLI, MiniMax, Pollinations (free, no key), or Google Gemini (free AI Studio key). Pick a provider, then a model, aspect ratio or pixel size, and image count. Bailian supports 1–6 images with seed/negative/prompt-extend/watermark controls (watermark off by default). MiniMax returns 1–9 per request with fixed aspect ratios. Pollinations and Gemini fan out up to 4. Style chips append suffixes; a dice button sets a random seed; Enhance with AI rewrites your prompt. |
 | **Edit** | Image-to-image via `bl image edit`. Drag & drop or pick source images (local files or URLs), describe the change, optionally choose an edit function for `wanx*-imageedit` models. |
 | **Video** | Text-to-video and image-to-video. Bailian runs `bl video generate` (happyhorse / wan2.6 models) with resolution, aspect ratio, duration, seed, and watermark controls. MiniMax runs Hailuo over HTTP with duration and resolution; image-to-video uses a local first frame or an image URL. Results play inline and are saved to your library folder. |
+| **Music** | Generate full songs with MiniMax `music-2.0` / `music-1.5`. Describe the style, add optional lyrics with [verse]/[chorus] section tags, then play the result inline. Requires a MiniMax key. |
+| **Speech** | Text-to-audio. MiniMax `speech-2.8-hd` with voice, speed, and emotion controls, or Fish Audio (streams audio back, optional reference voice id). Plays inline with a scrubber. |
 | **Chat** | `bl text chat` with a transcript, system prompt, and per-reply token usage. Handy for prompt brainstorming. |
 | **Gallery** | History of every generation, edit, and video with search & filters. Click an image to open the full-size in-app viewer (zoom, pan, batch arrows, Describe, send-to-Edit). Videos play inline. |
 | **Quota** | Per-key local usage cards (images, edits, chats, tokens, 14-day chart) + account free-tier quota and rate-limit tables refreshed from the console. |
-| **API Keys** | Store multiple API keys in the macOS Keychain, each tagged as Bailian or MiniMax, select the active one, and test them. Without a selected key, BlStudio uses the active `bl` profile. |
+| **API Keys** | Store multiple API keys in the macOS Keychain, each tagged as Bailian, MiniMax, Google Gemini, or Fish Audio, select the active one, and test them. Without a selected key, BlStudio uses the active `bl` profile. |
 | **Settings** | bl binary path override, image library folder, default size/models, timeouts. |
 
 The key selected in the toolbar is passed to `bl` as `--api-key` for image/chat/vision calls.
@@ -82,7 +86,7 @@ Two layers, because Bailian quota lives in two places:
 
 ## How it works
 
-For Bailian, BlStudio shells out to the `bl` binary (`~/.local/bin/bl`, `/opt/homebrew/bin/bl`, `/usr/local/bin/bl`, or `$PATH`, override in Settings) with `--output json` and parses the CLI's JSON contracts. MiniMax, Pollinations, and Gemini are called directly over HTTP (no `bl` needed):
+For Bailian, BlStudio shells out to the `bl` binary (`~/.local/bin/bl`, `/opt/homebrew/bin/bl`, `/usr/local/bin/bl`, or `$PATH`, override in Settings) with `--output json` and parses the CLI's JSON contracts:
 
 - `image generate/edit` → `{urls, saved, total, task_id(s)}`
 - `video generate` → polls and saves the finished `.mp4` itself (`--download`)
@@ -91,6 +95,13 @@ For Bailian, BlStudio shells out to the `bl` binary (`~/.local/bin/bl`, `/opt/ho
 - errors arrive as `{"error": {code, message, hint}}` and surface with the hint text
 
 Live progress lines from `bl`'s stderr are shown while a job runs; long-running async tasks are polled by the CLI itself (`--poll-interval`).
+
+The non-Bailian providers are called directly over HTTP (no `bl` needed):
+
+- MiniMax `image_generation` (images), `video_generation` + query/retrieve polling (video), `music_generation` (songs), and `t2a_v2` (speech). Audio is requested with `output_format: "url"` and downloaded.
+- Pollinations `image.pollinations.ai/prompt/...` (free, keyless images).
+- Google Gemini `generateContent` (free AI Studio images, base64 inline part).
+- Fish Audio `v1/tts` (speech returned as a binary stream).
 
 ## Project layout
 
@@ -113,4 +124,6 @@ Tools/       icon generator, Info.plist template
 - App Transport Security allows arbitrary loads because some image CDNs serve results over plain HTTP.
 - MiniMax Hailuo video accepts duration and resolution only on Hailuo models; renders take a few minutes and are polled automatically. MiniMax image-to-video takes a local first frame (sent as a data URI), while Bailian image-to-video needs a publicly reachable image URL.
 - Pollinations is free and keyless but is a shared public service, so it can be slow or rate-limited at times. Gemini image generation uses Google AI Studio's free tier, which has daily request limits.
-- Speech and other `bl` capabilities aren't wrapped yet. The Chat tab plus a terminal cover the rest.
+- MiniMax music generation (`music-2.0` / `music-1.5`) composes a full song synchronously and usually takes about a minute. MiniMax speech uses `speech-2.8-hd` with a system voice id. Both are billed by MiniMax like other MiniMax calls.
+- Fish Audio streams speech back directly and is credit-based; the Test button runs a tiny TTS request to confirm a key. Leave the reference id empty to use your account's default voice.
+- Other `bl` capabilities aren't wrapped yet. The Chat tab plus a terminal cover the rest.

@@ -183,6 +183,8 @@ enum WorkKind: String, Codable, Sendable, CaseIterable {
     case imageGenerate = "image generate"
     case imageEdit = "image edit"
     case videoGenerate = "video generate"
+    case musicGenerate = "music generate"
+    case speech = "speech"
     case chat = "text chat"
     case vision = "vision describe"
 }
@@ -227,6 +229,7 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
     case minimax = "minimax"
     case pollinations = "pollinations"
     case gemini = "gemini"
+    case fish = "fish"
 
     var label: String {
         switch self {
@@ -234,6 +237,7 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
         case .minimax: return "MiniMax"
         case .pollinations: return "Pollinations"
         case .gemini: return "Google Gemini"
+        case .fish: return "Fish Audio"
         }
     }
 
@@ -253,4 +257,5 @@ struct APIKeyMeta: Codable, Identifiable, Sendable {
     var resolvedProvider: KeyProvider { provider ?? .bailian }
     var isMiniMax: Bool { resolvedProvider == .minimax }
     var isGemini: Bool { resolvedProvider == .gemini }
+    var isFish: Bool { resolvedProvider == .fish }
 }

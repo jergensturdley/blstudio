@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 
 // MARK: - Image thumbnail
 
@@ -148,5 +149,145 @@ enum FileActions {
 
     static func open(_ path: String) {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    }
+}
+
+// MARK: - Audio player
+
+/// Compact player for generated music/speech with play/pause and a scrubber.
+struct AudioPlayerCard: View {
+    let path: String
+    @State private var player: AVPlayer?
+    @State private var isPlaying = false
+    @State private var progress: Double = 0
+    @State private var duration: Double = 0
+    @State private var timeObserver: Any?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Button {
+                    togglePlay()
+                } label: {
+                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 34))
+                }
+                .buttonStyle(.plain)
+                .help(isPlaying ? "Pause" : "Play")
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Slider(value: $progress, in: 0...max(duration, 0.01)) { editing in
+                        if !editing { seek(to: progress) }
+                    }
+                    HStack {
+                        Text(Self.timeString(progress))
+                        Spacer()
+                        Text(Self.timeString(duration))
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                }
+            }
+            HStack(spacing: 8) {
+                Button { FileActions.open(path) } label: {
+                    Label("Open", systemImage: "waveform")
+                }
+                Button { FileActions.reveal([path]) } label: {
+                    Label("Reveal in Finder", systemImage: "folder")
+                }
+                Spacer()
+                Text(URL(fileURLWithPath: path).lastPathComponent)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .controlSize(.small)
+        }
+        .onAppear { setup() }
+        .onDisappear { teardown() }
+    }
+
+    private func setup() {
+        guard player == nil else { return }
+        let p = AVPlayer(url: URL(fileURLWithPath: path))
+        player = p
+        Task {
+            guard let item = p.currentItem else { return }
+            if let d = try? await item.asset.load(.duration), d.seconds.isFinite {
+                duration = max(d.seconds, 0.01)
+            }
+        }
+        timeObserver = p.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
+            queue: .main
+        ) { time in
+            progress = time.seconds
+            isPlaying = p.timeControlStatus == .playing
+        }
+    }
+
+    private func teardown() {
+        if let timeObserver, let player {
+            player.removeTimeObserver(timeObserver)
+        }
+        timeObserver = nil
+        player?.pause()
+        player = nil
+        isPlaying = false
+    }
+
+    private func togglePlay() {
+        guard let player else { return }
+        if isPlaying { player.pause() } else { player.play() }
+        isPlaying.toggle()
+    }
+
+    private func seek(to seconds: Double) {
+        player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
+    }
+
+    static func timeString(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// Compact row for a generated audio result in the recent lists.
+struct AudioRow: View {
+    let title: String
+    let subtitle: String
+    let path: String
+    var onPlay: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "waveform.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.callout)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(action: onPlay) {
+                Image(systemName: "play.fill")
+            }
+            .buttonStyle(.borderless)
+            .help("Preview in player")
+            Button { FileActions.reveal([path]) } label: {
+                Image(systemName: "folder")
+            }
+            .buttonStyle(.borderless)
+            .help("Reveal in Finder")
+        }
+        .padding(.vertical, 4)
     }
 }

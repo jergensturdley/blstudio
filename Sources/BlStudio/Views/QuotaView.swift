@@ -213,6 +213,12 @@ struct KeyUsageCard: View {
                 if summary.videos > 0 {
                     stat("Videos", "\(summary.videos)")
                 }
+                if summary.music > 0 {
+                    stat("Music", "\(summary.music)")
+                }
+                if summary.audio > 0 {
+                    stat("Speech", "\(summary.audio)")
+                }
                 stat("Chats", "\(summary.chats)")
                 stat("Tokens", Fmt.tokens(summary.totalTokens))
                 stat("Today", "\(summary.todayImages) img")

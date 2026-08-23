@@ -158,6 +158,19 @@ enum SelfTest {
             check("gemini image decode", false)
         }
 
+        // 7d. MiniMax audio response decoding (music / speech). URL mode and hex mode.
+        let audioURL = """
+        {"data":{"audio":"https://cdn.minimax.io/song.mp3"},
+         "base_resp":{"status_code":0,"status_msg":"success"}}
+        """
+        if let a = try? JSONDecoder().decode(MiniMaxAudioResult.self, from: Data(audioURL.utf8)) {
+            check("minimax audio decode (url)", a.data?.audio?.hasPrefix("https://") == true)
+        } else {
+            check("minimax audio decode (url)", false)
+        }
+        let hexBytes = MiniMaxClient.hexToData("deadbeef")
+        check("minimax hex audio decode", hexBytes == Data([0xde, 0xad, 0xbe, 0xef]))
+
         // 8. Live integration (only if bl is installed): dry-run + auth status
         let client = BLClient()
         if let _ = try? client.resolveBinary() {
@@ -199,6 +212,9 @@ enum SelfTest {
         let named: [(String, AnyView)] = [
             ("GenerateView", AnyView(GenerateView().environment(state))),
             ("EditView", AnyView(EditView().environment(state))),
+            ("VideoView", AnyView(VideoView().environment(state))),
+            ("MusicView", AnyView(MusicView().environment(state))),
+            ("SpeechView", AnyView(SpeechView().environment(state))),
             ("ChatView", AnyView(ChatView().environment(state))),
             ("GalleryView", AnyView(GalleryView().environment(state))),
             ("QuotaView", AnyView(QuotaView().environment(state))),
