@@ -11,6 +11,7 @@ BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](
 - **Video generation**. Text-to-video and image-to-video through Bailian (`bl video generate`) or MiniMax Hailuo, with resolution, aspect ratio, duration, and seed controls, live progress, an inline player, and results saved to your library folder.
 - **Easy prompting**. Saved favorite prompts and saved negative prompts, one-click style suffixes, an Enhance-with-AI button that rewrites your prompt with a Qwen text model, and quick chat for iterating further.
 - **Image receiving**. Generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
+- **In-app image viewer**. Click any image to open it full-size inside BlStudio, no Preview needed. Pinch or use the zoom buttons to magnify (up to 8×), drag to pan, double-click to toggle fit/2×, and flip through batches with the arrows. Open, Reveal, Copy, Describe, and send-to-Edit are all in the viewer bar.
 - **Quota tracking per API key**. Every request is logged locally per key (images, edits, chats, tokens, failures, daily chart). Account-level free-tier quotas and RPM/TPM rate limits are pulled from `bl usage free` / `bl quota check` when your console session is logged in.
 
 ## Requirements
@@ -64,7 +65,7 @@ The version embedded in `Info.plist` is derived from the tag (`v1.2.0` → `1.2.
 | **Edit** | Image-to-image via `bl image edit`. Drag & drop or pick source images (local files or URLs), describe the change, optionally choose an edit function for `wanx*-imageedit` models. |
 | **Video** | Text-to-video and image-to-video. Bailian runs `bl video generate` (happyhorse / wan2.6 models) with resolution, aspect ratio, duration, seed, and watermark controls. MiniMax runs Hailuo over HTTP with duration and resolution; image-to-video uses a local first frame or an image URL. Results play inline and are saved to your library folder. |
 | **Chat** | `bl text chat` with a transcript, system prompt, and per-reply token usage. Handy for prompt brainstorming. |
-| **Gallery** | History of every generation/edit with search & filters. Detail view offers Open/Copy/Reveal, **Use as edit source**, and **Describe** (runs `bl vision describe`). |
+| **Gallery** | History of every generation, edit, and video with search & filters. Click an image to open the full-size in-app viewer (zoom, pan, batch arrows, Describe, send-to-Edit). Videos play inline. |
 | **Quota** | Per-key local usage cards (images, edits, chats, tokens, 14-day chart) + account free-tier quota and rate-limit tables refreshed from the console. |
 | **API Keys** | Store multiple API keys in the macOS Keychain, each tagged as Bailian or MiniMax, select the active one, and test them. Without a selected key, BlStudio uses the active `bl` profile. |
 | **Settings** | bl binary path override, image library folder, default size/models, timeouts. |

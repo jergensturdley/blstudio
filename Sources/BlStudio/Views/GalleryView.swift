@@ -6,6 +6,7 @@ struct GalleryView: View {
     @State private var searchText = ""
     @State private var kindFilter: WorkKind? = nil
     @State private var selectedEntry: HistoryEntry?
+    @State private var fullImage: FullImageItem?
 
     private var filtered: [HistoryEntry] {
         app.history.entries.filter { entry in
@@ -55,7 +56,13 @@ struct GalleryView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 10)], spacing: 10) {
                         ForEach(filtered) { entry in
                             GalleryCell(entry: entry)
-                                .onTapGesture { selectedEntry = entry }
+                                .onTapGesture {
+                                    if entry.kind == .videoGenerate || entry.savedPaths.isEmpty {
+                                        selectedEntry = entry
+                                    } else {
+                                        fullImage = FullImageItem(paths: entry.savedPaths, index: 0, entry: entry)
+                                    }
+                                }
                         }
                     }
                     .padding()
@@ -64,6 +71,9 @@ struct GalleryView: View {
         }
         .sheet(item: $selectedEntry) { entry in
             GalleryDetailSheet(entry: entry)
+        }
+        .sheet(item: $fullImage) { item in
+            FullImageViewer(paths: item.paths, entry: item.entry, index: item.index)
         }
     }
 }

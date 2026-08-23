@@ -301,7 +301,9 @@ struct GenerateView: View {
                                         .frame(height: 130)
                                         .frame(maxWidth: .infinity)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .onTapGesture { selectedEntry = entry }
+                                        .onTapGesture {
+                                            fullImage = FullImageItem(paths: entry.savedPaths, index: 0, entry: entry)
+                                        }
                                 }
                             }
                         }
@@ -323,9 +325,13 @@ struct GenerateView: View {
         .sheet(item: $selectedEntry) { entry in
             GalleryDetailSheet(entry: entry)
         }
+        .sheet(item: $fullImage) { item in
+            FullImageViewer(paths: item.paths, entry: item.entry, index: item.index)
+        }
     }
 
     @State private var selectedEntry: HistoryEntry?
+    @State private var fullImage: FullImageItem?
     @State private var runningTask: Task<Void, Never>?
 }
 
@@ -354,19 +360,23 @@ struct TriStatePicker: View {
     }
 }
 
-/// Clickable image grid with per-image actions.
+/// Clickable image grid with per-image actions. Tapping an image opens the
+/// in-app full-size viewer.
 struct ImageGrid: View {
     let paths: [String]
+    @State private var fullImage: FullImageItem?
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], spacing: 10) {
-            ForEach(paths, id: \.self) { path in
+            ForEach(Array(paths.enumerated()), id: \.offset) { index, path in
                 VStack(spacing: 6) {
                     ThumbImage(path: path)
                         .frame(height: 200)
                         .frame(maxWidth: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .onTapGesture { FileActions.open(path) }
+                        .onTapGesture {
+                            fullImage = FullImageItem(paths: paths, index: index, entry: nil)
+                        }
                     HStack(spacing: 8) {
                         Button { FileActions.copyToPasteboard(path) } label: {
                             Image(systemName: "doc.on.doc")
@@ -386,6 +396,9 @@ struct ImageGrid: View {
                     .buttonStyle(.borderless)
                 }
             }
+        }
+        .sheet(item: $fullImage) { item in
+            FullImageViewer(paths: item.paths, entry: item.entry, index: item.index)
         }
     }
 }
