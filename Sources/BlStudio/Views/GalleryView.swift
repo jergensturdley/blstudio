@@ -131,6 +131,7 @@ struct GalleryDetailSheet: View {
     @State private var description: String?
     @State private var describing = false
     @State private var describeError: String?
+    @State private var showDeleteDialog = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -191,6 +192,12 @@ struct GalleryDetailSheet: View {
                             Button {
                                 FileActions.reveal(entry.savedPaths)
                             } label: { Label("Reveal", systemImage: "folder") }
+
+                            Spacer()
+
+                            Button(role: .destructive) {
+                                showDeleteDialog = true
+                            } label: { Label("Delete", systemImage: "trash") }
                         }
                         .controlSize(.small)
                     }
@@ -239,6 +246,20 @@ struct GalleryDetailSheet: View {
         }
         .padding(20)
         .frame(minWidth: 700, minHeight: 480)
+        .confirmationDialog("Delete", isPresented: $showDeleteDialog, titleVisibility: .visible) {
+            Button(entry.savedPaths.count > 1 ? "Move Files to Trash" : "Move File to Trash",
+                   role: .destructive) {
+                app.history.remove(entry.id, trashFiles: true)
+                dismiss()
+            }
+            Button("Remove from Gallery Only", role: .destructive) {
+                app.history.remove(entry.id, trashFiles: false)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Move to Trash deletes the file(s) and removes the result from the gallery. Remove from Gallery keeps the file(s) on disk.")
+        }
     }
 
     private func metaLabel(_ s: String) -> some View {

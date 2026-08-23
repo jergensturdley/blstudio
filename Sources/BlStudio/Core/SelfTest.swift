@@ -145,6 +145,19 @@ enum SelfTest {
             check("minimax file retrieve decode", false)
         }
 
+        // 7c. Gemini image response decoding (base64 inline image part).
+        let geminiOK = """
+        {"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aGVsbG8="}}]},
+         "finishReason":"STOP"}]}
+        """
+        if let g = try? JSONDecoder().decode(GeminiGenResponse.self, from: Data(geminiOK.utf8)) {
+            let part = g.candidates?.first?.content?.parts?.first
+            check("gemini image decode",
+                  part?.inlineData?.mimeType == "image/png" && part?.inlineData?.data == "aGVsbG8=")
+        } else {
+            check("gemini image decode", false)
+        }
+
         // 8. Live integration (only if bl is installed): dry-run + auth status
         let client = BLClient()
         if let _ = try? client.resolveBinary() {

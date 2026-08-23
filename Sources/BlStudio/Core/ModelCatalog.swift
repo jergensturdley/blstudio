@@ -72,6 +72,43 @@ enum ModelCatalog {
     static let videoDurationsMiniMax = [6, 10]
     static let videoResolutionsMiniMax = ["768P", "1080P"]
 
+    // MARK: Free image providers
+
+    /// Pollinations.ai (keyless) models.
+    static let pollinationsModels = [
+        "flux",
+        "turbo",
+        "sana",
+    ]
+
+    /// Google Gemini image models (free tier via AI Studio).
+    static let geminiImageModels = [
+        "gemini-2.5-flash-image",
+    ]
+
+    /// Aspect ratios shared by the free providers.
+    static let freeAspectRatios = [
+        "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3",
+    ]
+
+    /// Maps an aspect-ratio string to pixel dimensions with the given long edge.
+    /// Used by providers that take width/height instead of a ratio.
+    static func pixelSize(forAspectRatio ratio: String, longEdge: Int = 1024) -> (Int, Int) {
+        let parts = ratio.split(separator: ":")
+        guard parts.count == 2,
+              let w = Double(parts[0]), let h = Double(parts[1]),
+              w > 0, h > 0 else {
+            return (longEdge, longEdge)
+        }
+        if w >= h {
+            let height = Int((Double(longEdge) * h / w).rounded())
+            return (longEdge, max(height, 64))
+        } else {
+            let width = Int((Double(longEdge) * w / h).rounded())
+            return (max(width, 64), longEdge)
+        }
+    }
+
     static let editFunctions = [
         "description_edit",
         "stylization_all",

@@ -205,6 +205,26 @@ final class KeysStore {
         activeMiniMaxMeta?.label ?? "No MiniMax key"
     }
 
+    // MARK: Gemini key resolution
+
+    var geminiConfigured: Bool { keys.contains { $0.isGemini } }
+
+    /// The Gemini key to use: the globally active key when it is a Gemini key,
+    /// otherwise the first Gemini key in the list.
+    var activeGeminiMeta: APIKeyMeta? {
+        if let m = activeMeta, m.isGemini { return m }
+        return keys.first { $0.isGemini }
+    }
+
+    var activeGeminiSecret: String? {
+        guard let m = activeGeminiMeta else { return nil }
+        return Keychain.getSecret(account: m.id.uuidString)
+    }
+
+    func activeGeminiLabel() -> String {
+        activeGeminiMeta?.label ?? "No Gemini key"
+    }
+
     func updateLabel(_ id: UUID, label: String) {
         guard let i = keys.firstIndex(where: { $0.id == id }) else { return }
         keys[i].label = label

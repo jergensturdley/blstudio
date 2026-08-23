@@ -225,13 +225,20 @@ struct UsageDayPoint: Identifiable, Sendable {
 enum KeyProvider: String, Codable, Sendable, CaseIterable {
     case bailian = "bailian"
     case minimax = "minimax"
+    case pollinations = "pollinations"
+    case gemini = "gemini"
 
     var label: String {
         switch self {
         case .bailian: return "Bailian (bl)"
         case .minimax: return "MiniMax"
+        case .pollinations: return "Pollinations"
+        case .gemini: return "Google Gemini"
         }
     }
+
+    /// Pollinations is keyless; the others need a stored API key.
+    var needsKey: Bool { self != .pollinations }
 }
 
 struct APIKeyMeta: Codable, Identifiable, Sendable {
@@ -245,4 +252,5 @@ struct APIKeyMeta: Codable, Identifiable, Sendable {
 
     var resolvedProvider: KeyProvider { provider ?? .bailian }
     var isMiniMax: Bool { resolvedProvider == .minimax }
+    var isGemini: Bool { resolvedProvider == .gemini }
 }

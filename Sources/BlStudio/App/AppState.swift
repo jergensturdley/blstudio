@@ -8,6 +8,8 @@ import Observation
 final class AppState {
     let client = BLClient()
     let minimax = MiniMaxClient()
+    let pollinations = PollinationsClient()
+    let gemini = GeminiClient()
     @ObservationIgnored let settingsStore = SettingsStore()
     @ObservationIgnored let keysStore = KeysStore()
     @ObservationIgnored let ledger = UsageLedger()
@@ -55,6 +57,12 @@ final class AppState {
     var miniMaxSecret: String? { keysStore.activeMiniMaxSecret }
     var miniMaxKeyId: UUID? { keysStore.activeMiniMaxMeta?.id }
     var miniMaxKeyLabel: String { keysStore.activeMiniMaxLabel() }
+
+    /// Gemini key resolution (independent of the Bailian active key).
+    var geminiConfigured: Bool { keysStore.geminiConfigured }
+    var geminiSecret: String? { keysStore.activeGeminiSecret }
+    var geminiKeyId: UUID? { keysStore.activeGeminiMeta?.id }
+    var geminiKeyLabel: String { keysStore.activeGeminiLabel() }
 
     func recordUsage(kind: WorkKind, model: String?, images: Int = 0,
                      promptTokens: Int = 0, completionTokens: Int = 0,
@@ -223,10 +231,20 @@ final class GenerateModel {
     }
 
     var isMiniMax: Bool { provider == KeyProvider.minimax.rawValue }
+    var isPollinations: Bool { provider == KeyProvider.pollinations.rawValue }
+    var isGemini: Bool { provider == KeyProvider.gemini.rawValue }
 
     func generate() async {
         if isMiniMax {
             await generateMiniMax()
+            return
+        }
+        if isPollinations {
+            await generatePollinations()
+            return
+        }
+        if isGemini {
+            await generateGemini()
             return
         }
         guard canRun else { return }
@@ -358,6 +376,137 @@ final class GenerateModel {
             app.history.add(HistoryEntry(
                 kind: .imageGenerate, prompt: promptText, model: displayModel,
                 keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    /// Generates images through Pollinations.ai (free, no API key). Each image is
+    /// a separate request; a base seed is offset per image so batches stay distinct.
+    private func generatePollinations() async {
+        guard canRun else { return }
+
+        let ratio = ModelCatalog.freeAspectRatios.contains(size) ? size : "1:1"
+        let (w, h) = ModelCatalog.pixelSize(forAspectRatio: ratio)
+        let modelUsed = model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "flux" : model
+        let displayModel = "Pollinations \(modelUsed)"
+        let promptText = composedPrompt
+
+        let baseSeed: Int
+        do {
+            if let p = try parseSeed(enabled: seedEnabled, text: seedText) {
+                baseSeed = p
+            } else {
+                baseSeed = Int.random(in: 0...2_147_483_647)
+            }
+        } catch {
+            phase = .failed(error.localizedDescription)
+            return
+        }
+
+        phase = .running
+        progressLine = "Contacting Pollinations…"
+        lastResult = nil
+        lastSavedPaths = []
+
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let prefix = AppState.outPrefix(for: prompt, kind: "img")
+        let started = Date()
+
+        do {
+            var saved: [String] = []
+            let total = max(1, count)
+            for i in 0..<total {
+                progressLine = "Generating image \(i + 1)/\(total)…"
+                let dest = outDir.appendingPathComponent("\(prefix)-\(i + 1).jpg")
+                let url = try await app.pollinations.generate(
+                    prompt: promptText, model: modelUsed,
+                    width: w, height: h, seed: baseSeed + i, dest: dest)
+                saved.append(url.path)
+            }
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPaths = saved
+            phase = .done
+            app.ledger.record(UsageEvent(
+                keyId: nil, kind: .imageGenerate, model: displayModel, at: Date(),
+                images: saved.count, promptTokens: 0, completionTokens: 0,
+                durationMs: ms, ok: true))
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: nil, keyLabel: "Pollinations (no key)",
+                savedPaths: saved, remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.ledger.record(UsageEvent(
+                keyId: nil, kind: .imageGenerate, model: displayModel, at: Date(),
+                images: 0, promptTokens: 0, completionTokens: 0,
+                durationMs: ms, ok: false))
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: nil, keyLabel: "Pollinations (no key)",
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    /// Generates images through Google Gemini (free AI Studio key). Each call
+    /// returns one image, so the requested count is produced sequentially.
+    private func generateGemini() async {
+        guard canRun else { return }
+        guard let apiKey = app.geminiSecret else {
+            phase = .failed("No Gemini API key configured. Add a free Google AI Studio key in the API Keys tab and set its provider to Google Gemini.")
+            return
+        }
+
+        let ratio = ModelCatalog.freeAspectRatios.contains(size) ? size : "1:1"
+        let modelUsed = model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "gemini-2.5-flash-image" : model
+        let displayModel = "Gemini \(modelUsed)"
+        let promptText = composedPrompt
+
+        phase = .running
+        progressLine = "Contacting Gemini…"
+        lastResult = nil
+        lastSavedPaths = []
+
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let prefix = AppState.outPrefix(for: prompt, kind: "img")
+        let started = Date()
+
+        do {
+            var saved: [String] = []
+            let total = max(1, count)
+            for i in 0..<total {
+                progressLine = "Generating image \(i + 1)/\(total)…"
+                let dest = outDir.appendingPathComponent("\(prefix)-\(i + 1).png")
+                let url = try await app.gemini.generate(
+                    apiKey: apiKey, model: modelUsed, prompt: promptText,
+                    aspectRatio: ratio, dest: dest)
+                saved.append(url.path)
+            }
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPaths = saved
+            phase = .done
+            app.recordUsage(kind: .imageGenerate, model: displayModel, images: saved.count,
+                            durationMs: ms, ok: true, keyIdOverride: app.geminiKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.geminiKeyId, keyLabel: app.geminiKeyLabel,
+                savedPaths: saved, remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .imageGenerate, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: app.geminiKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.geminiKeyId, keyLabel: app.geminiKeyLabel,
                 savedPaths: [], remoteUrls: [], taskId: nil,
                 durationMs: ms, ok: false, detail: error.localizedDescription))
         }

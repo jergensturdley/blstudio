@@ -119,8 +119,10 @@ struct GenerateView: View {
                             Picker("", selection: $gen.provider) {
                                 Text("Bailian (bl)").tag(KeyProvider.bailian.rawValue)
                                 Text("MiniMax").tag(KeyProvider.minimax.rawValue)
+                                Text("Pollinations").tag(KeyProvider.pollinations.rawValue)
+                                Text("Google Gemini").tag(KeyProvider.gemini.rawValue)
                             }
-                            .pickerStyle(.segmented)
+                            .pickerStyle(.menu)
                             .labelsHidden()
                             .frame(maxWidth: 300)
                         }
@@ -137,16 +139,40 @@ struct GenerateView: View {
                                 }
                             }
                         }
+                        if gen.isPollinations {
+                            Text("Pollinations is free and needs no API key. Seed is supported; negative prompt and watermark are not.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        if gen.isGemini {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Gemini image generation uses a free Google AI Studio key. Seed, negative prompt, and watermark are not available.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if !app.geminiConfigured {
+                                    Text("No Gemini key yet. Add a free AI Studio key in the API Keys tab with provider Google Gemini.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                        }
 
                         LabeledContent("Model") {
                             SuggestingField(title: "Model", text: $gen.model,
-                                            suggestions: gen.isMiniMax ? ModelCatalog.minimaxImageModels : ModelCatalog.imageModels)
+                                            suggestions: modelSuggestions)
                                 .frame(maxWidth: 300)
                         }
                         LabeledContent("Size") {
                             if gen.isMiniMax {
                                 Picker("", selection: $gen.size) {
                                     ForEach(ModelCatalog.minimaxAspectRatios, id: \.self) { Text($0).tag($0) }
+                                }
+                                .pickerStyle(.menu)
+                                .labelsHidden()
+                                .frame(maxWidth: 300)
+                            } else if gen.isPollinations || gen.isGemini {
+                                Picker("", selection: $gen.size) {
+                                    ForEach(ModelCatalog.freeAspectRatios, id: \.self) { Text($0).tag($0) }
                                 }
                                 .pickerStyle(.menu)
                                 .labelsHidden()
@@ -169,12 +195,10 @@ struct GenerateView: View {
                         }
                         LabeledContent("Images") {
                             VStack(alignment: .leading, spacing: 2) {
-                                Stepper("\(gen.count)", value: $gen.count, in: gen.isMiniMax ? 1...9 : 1...6)
+                                Stepper("\(gen.count)", value: $gen.count, in: countRange)
                                     .fixedSize()
                                 if gen.count > 1 {
-                                    Text(gen.isMiniMax
-                                         ? "MiniMax returns \(gen.count) images in one request."
-                                         : "Runs \(gen.count) parallel single-image requests (works with every model).")
+                                    Text(countCaption)
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -201,12 +225,13 @@ struct GenerateView: View {
                                 .help("Fill with a random seed")
                             }
                         }
-                        .disabled(gen.isMiniMax)
+                        .disabled(gen.isMiniMax || gen.isGemini)
                         LabeledContent("Negative prompt") {
                             TextField("things to avoid", text: $gen.negativePrompt)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(maxWidth: 300)
                         }
+                        .disabled(!isBailian)
 
                         HStack(spacing: 8) {
                             Button {
@@ -236,15 +261,17 @@ struct GenerateView: View {
                                 .disabled(gen.negativePrompt.isEmpty)
                         }
                         .controlSize(.small)
-                        .disabled(gen.isMiniMax)
+                        .disabled(!isBailian)
 
-                        LabeledContent("Prompt extend") {
-                            TriStatePicker(value: $gen.promptExtend)
+                        if gen.isMiniMax || isBailian {
+                            LabeledContent("Prompt extend") {
+                                TriStatePicker(value: $gen.promptExtend)
+                            }
                         }
                         LabeledContent("Watermark") {
                             TriStatePicker(value: $gen.watermark)
                         }
-                        .disabled(gen.isMiniMax)
+                        .disabled(!isBailian)
                     }
 
                     HStack {
@@ -274,6 +301,9 @@ struct GenerateView: View {
                 if gen.isMiniMax {
                     if !ModelCatalog.minimaxAspectRatios.contains(gen.size) { gen.size = "1:1" }
                     if gen.count > 9 { gen.count = 9 }
+                } else if gen.isPollinations || gen.isGemini {
+                    if !ModelCatalog.freeAspectRatios.contains(gen.size) { gen.size = "1:1" }
+                    if gen.count > 4 { gen.count = 4 }
                 } else {
                     if gen.count > 6 { gen.count = 6 }
                 }
@@ -333,6 +363,25 @@ struct GenerateView: View {
     @State private var selectedEntry: HistoryEntry?
     @State private var fullImage: FullImageItem?
     @State private var runningTask: Task<Void, Never>?
+
+    // Provider-derived helpers
+    private var isBailian: Bool { app.generate.provider == KeyProvider.bailian.rawValue }
+    private var modelSuggestions: [String] {
+        if app.generate.isMiniMax { return ModelCatalog.minimaxImageModels }
+        if app.generate.isPollinations { return ModelCatalog.pollinationsModels }
+        if app.generate.isGemini { return ModelCatalog.geminiImageModels }
+        return ModelCatalog.imageModels
+    }
+    private var countRange: ClosedRange<Int> {
+        if app.generate.isMiniMax { return 1...9 }
+        if app.generate.isPollinations || app.generate.isGemini { return 1...4 }
+        return 1...6
+    }
+    private var countCaption: String {
+        if app.generate.isMiniMax { return "MiniMax returns \(app.generate.count) images in one request." }
+        if app.generate.isPollinations || app.generate.isGemini { return "Runs \(app.generate.count) requests in sequence." }
+        return "Runs \(app.generate.count) parallel single-image requests (works with every model)."
+    }
 }
 
 /// on/off/default tri-state control for optional CLI flags.

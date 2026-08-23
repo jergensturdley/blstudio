@@ -10,6 +10,14 @@ struct KeysView: View {
     @State private var testResult: [UUID: String] = [:]
     @State private var testing: UUID?
 
+    private var newKeyPlaceholder: String {
+        switch newProvider {
+        case .minimax: return "eyJ…"
+        case .gemini: return "AIza…"
+        default: return "sk-…"
+        }
+    }
+
     var body: some View {
         @Bindable var keys = app.keysStore
 
@@ -94,19 +102,19 @@ struct KeysView: View {
                         }
                         GridRow {
                             Text("API key").foregroundStyle(.secondary)
-                            SecureField(newProvider == .minimax ? "eyJ…" : "sk-…", text: $newSecret)
+                            SecureField(newKeyPlaceholder, text: $newSecret)
                                 .textFieldStyle(.roundedBorder)
                         }
                         GridRow {
                             Text("Provider").foregroundStyle(.secondary)
                             Picker("", selection: $newProvider) {
-                                ForEach(KeyProvider.allCases, id: \.self) { p in
+                                ForEach(KeyProvider.allCases.filter { $0.needsKey }, id: \.self) { p in
                                     Text(p.label).tag(p)
                                 }
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
-                            .frame(maxWidth: 300, alignment: .leading)
+                            .frame(maxWidth: 340, alignment: .leading)
                         }
                     }
                     HStack {
@@ -192,6 +200,9 @@ struct KeysView: View {
         do {
             if key.isMiniMax {
                 let msg = try await app.minimax.validate(apiKey: secret)
+                testResult[key.id] = msg
+            } else if key.isGemini {
+                let msg = try await app.gemini.validate(apiKey: secret)
                 testResult[key.id] = msg
             } else {
                 var req = ChatRequest(message: "ping")

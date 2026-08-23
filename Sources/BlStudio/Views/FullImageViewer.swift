@@ -23,6 +23,7 @@ struct FullImageViewer: View {
     @State private var describing = false
     @State private var description: String?
     @State private var describeError: String?
+    @State private var showDeleteDialog = false
 
     private var currentPath: String? {
         paths.indices.contains(index) ? paths[index] : nil
@@ -58,6 +59,32 @@ struct FullImageViewer: View {
         }
         .frame(minWidth: 760, minHeight: 560)
         .onExitCommand { dismiss() }
+        .confirmationDialog("Delete", isPresented: $showDeleteDialog, titleVisibility: .visible) {
+            if entry != nil {
+                Button(paths.count > 1 ? "Move Files to Trash" : "Move File to Trash",
+                       role: .destructive) {
+                    if let entry { app.history.remove(entry.id, trashFiles: true) }
+                    dismiss()
+                }
+                Button("Remove from Gallery Only", role: .destructive) {
+                    if let entry { app.history.remove(entry.id, trashFiles: false) }
+                    dismiss()
+                }
+            } else {
+                Button("Move File to Trash", role: .destructive) {
+                    if let p = currentPath {
+                        try? FileManager.default.trashItem(
+                            at: URL(fileURLWithPath: p), resultingItemURL: nil)
+                    }
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(entry != nil
+                 ? "Move to Trash deletes the file(s) and removes the result from the gallery. Remove from Gallery keeps the file(s) on disk but hides them here."
+                 : "Moves the current image file to the Trash. You can restore it from the Trash.")
+        }
     }
 
     private var closeButton: some View {
@@ -120,6 +147,13 @@ struct FullImageViewer: View {
                         .help("Open in Preview")
                     Button { FileActions.reveal([p]) } label: { Label("Reveal", systemImage: "folder") }
                     Button { FileActions.copyToPasteboard(p) } label: { Label("Copy", systemImage: "doc.on.doc") }
+                    Divider().frame(height: 18)
+                    Button(role: .destructive) { showDeleteDialog = true } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .help(entry != nil
+                          ? "Delete from the gallery and/or move the file to the Trash"
+                          : "Move this file to the Trash")
                 }
 
                 if let entry, entry.kind == .imageGenerate || entry.kind == .imageEdit {
