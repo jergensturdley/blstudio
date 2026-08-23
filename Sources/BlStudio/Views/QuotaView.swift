@@ -210,6 +210,9 @@ struct KeyUsageCard: View {
             HStack(spacing: 20) {
                 stat("Images", "\(summary.images)")
                 stat("Edits", "\(summary.edits)")
+                if summary.videos > 0 {
+                    stat("Videos", "\(summary.videos)")
+                }
                 stat("Chats", "\(summary.chats)")
                 stat("Tokens", Fmt.tokens(summary.totalTokens))
                 stat("Today", "\(summary.todayImages) img")

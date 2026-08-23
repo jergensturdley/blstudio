@@ -118,6 +118,33 @@ enum SelfTest {
             check("minimax error decode", false)
         }
 
+        // 7b. MiniMax video response decoding.
+        let mvTask = """
+        {"base_resp":{"status_code":0,"status_msg":"success"},"task_id":"abc123"}
+        """
+        if let t = try? JSONDecoder().decode(MiniMaxVideoTask.self, from: Data(mvTask.utf8)) {
+            check("minimax video task decode", t.task_id == "abc123" && t.base_resp?.status_code == 0)
+        } else {
+            check("minimax video task decode", false)
+        }
+        let mvQuery = """
+        {"base_resp":{"status_code":0,"status_msg":"success"},"status":"Success","file_id":"file_42"}
+        """
+        if let q = try? JSONDecoder().decode(MiniMaxVideoQuery.self, from: Data(mvQuery.utf8)) {
+            check("minimax video query decode", q.status == "Success" && q.file_id == "file_42")
+        } else {
+            check("minimax video query decode", false)
+        }
+        let mvFile = """
+        {"base_resp":{"status_code":0,"status_msg":"success"},
+         "file":{"download_url":"https://cdn.minimax.io/v/xyz.mp4","filename":"video.mp4"}}
+        """
+        if let f = try? JSONDecoder().decode(MiniMaxFileRetrieve.self, from: Data(mvFile.utf8)) {
+            check("minimax file retrieve decode", f.file?.download_url?.hasSuffix(".mp4") == true)
+        } else {
+            check("minimax file retrieve decode", false)
+        }
+
         // 8. Live integration (only if bl is installed): dry-run + auth status
         let client = BLClient()
         if let _ = try? client.resolveBinary() {

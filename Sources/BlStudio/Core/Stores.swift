@@ -283,6 +283,7 @@ final class UsageLedger {
     struct KeySummary {
         var images = 0
         var edits = 0
+        var videos = 0
         var chats = 0
         var promptTokens = 0
         var completionTokens = 0
@@ -302,6 +303,7 @@ final class UsageLedger {
             switch e.kind {
             case .imageGenerate: s.images += e.images
             case .imageEdit: s.edits += e.images
+            case .videoGenerate: s.videos += 1
             case .chat: s.chats += 1
             case .vision: s.chats += 0
             }

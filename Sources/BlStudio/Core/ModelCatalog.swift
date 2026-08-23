@@ -40,6 +40,38 @@ enum ModelCatalog {
         "1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9",
     ]
 
+    // MARK: Video
+
+    /// Bailian text-to-video models.
+    static let videoT2VModelsBailian = [
+        "happyhorse-1.1-t2v",
+        "wan2.6-t2v",
+    ]
+
+    /// Bailian image-to-video models.
+    static let videoI2VModelsBailian = [
+        "happyhorse-1.1-i2v",
+    ]
+
+    static let videoResolutionsBailian = ["1080P", "720P"]
+    static let videoRatiosBailian = ["16:9", "9:16", "1:1"]
+    static let videoDurationsBailian = [5, 10]
+
+    /// MiniMax text-to-video models (Hailuo).
+    static let videoT2VModelsMiniMax = [
+        "MiniMax-Hailuo-2.3",
+        "T2V-01",
+    ]
+
+    /// MiniMax image-to-video models.
+    static let videoI2VModelsMiniMax = [
+        "I2V-01",
+    ]
+
+    /// MiniMax Hailuo accepts duration 6 or 10 and resolution 768P/1080P.
+    static let videoDurationsMiniMax = [6, 10]
+    static let videoResolutionsMiniMax = ["768P", "1080P"]
+
     static let editFunctions = [
         "description_edit",
         "stylization_all",

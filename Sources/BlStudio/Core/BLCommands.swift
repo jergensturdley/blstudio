@@ -50,6 +50,46 @@ extension BLClient {
                                  timeoutSeconds: timeoutSeconds + 60, onStderrLine: onProgress)
     }
 
+    // MARK: Video
+
+    /// Runs `bl video generate --download <outPath>`, which polls and saves the
+    /// finished video itself. We rely on the downloaded file rather than strict
+    /// JSON parsing, so this stays robust across CLI versions. Returns the raw
+    /// process output for best-effort metadata extraction.
+    func videoGenerate(
+        _ req: VideoGenRequest,
+        outPath: URL,
+        apiKey: String?,
+        pollInterval: Int = 5,
+        timeoutSeconds: Int = 900,
+        onProgress: (@Sendable (String) -> Void)? = nil
+    ) async throws -> BLProcessOutput {
+        var args = ["video", "generate", "--prompt", req.prompt]
+        if let img = req.imageURL, !img.isEmpty { args += ["--image", img] }
+        if let m = req.model, !m.isEmpty { args += ["--model", m] }
+        if let r = req.resolution, !r.isEmpty { args += ["--resolution", r] }
+        if let ratio = req.ratio, !ratio.isEmpty { args += ["--ratio", ratio] }
+        if let d = req.duration { args += ["--duration", String(d)] }
+        if let s = req.seed { args += ["--seed", String(s)] }
+        if let np = req.negativePrompt, !np.isEmpty { args += ["--negative-prompt", np] }
+        if let pe = req.promptExtend { args += ["--prompt-extend", pe ? "true" : "false"] }
+        if let wm = req.watermark { args += ["--watermark", wm ? "true" : "false"] }
+        args += ["--download", outPath.path,
+                 "--poll-interval", String(pollInterval),
+                 "--timeout", String(timeoutSeconds),
+                 "--output", "json"]
+        if let apiKey, !apiKey.isEmpty { args += ["--api-key", apiKey] }
+        let out = try await run(arguments: args, timeoutSeconds: timeoutSeconds + 60,
+                                onStderrLine: onProgress)
+        guard out.exitCode == 0 else {
+            if let decoded = try? Self.decode(BLErrorEnvelope.self, from: out) {
+                throw BLClientError.apiError(code: nil, message: decoded.error.message, hint: decoded.error.hint)
+            }
+            throw BLClientError.nonZeroExit(out.exitCode, stderrTail: Self.tail(out.stderr))
+        }
+        return out
+    }
+
     private func imageCommonFlags(
         model: String?, size: String?, n: Int, seed: Int?,
         negativePrompt: String?, promptExtend: Bool?, watermark: Bool?

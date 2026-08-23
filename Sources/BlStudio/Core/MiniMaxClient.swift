@@ -97,6 +97,165 @@ final class MiniMaxClient: @unchecked Sendable {
             throw MiniMaxError.badResponse(head)
         }
     }
+
+    // MARK: Video (Hailuo)
+
+    /// POST /v1/video_generation. Returns the async task id.
+    func videoGenerate(
+        apiKey: String,
+        model: String,
+        prompt: String,
+        firstFrameImage: String? = nil,
+        duration: Int? = nil,
+        resolution: String? = nil
+    ) async throws -> String {
+        guard let url = URL(string: "\(baseURL)/v1/video_generation") else { throw MiniMaxError.badURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 120
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var payload: [String: Any] = ["model": model, "prompt": prompt]
+        if let f = firstFrameImage, !f.isEmpty { payload["first_frame_image"] = f }
+        if let d = duration { payload["duration"] = d }
+        if let r = resolution, !r.isEmpty { payload["resolution"] = r }
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try Self.checkHTTP(response, data: data)
+        let decoded = try JSONDecoder().decode(MiniMaxVideoTask.self, from: data)
+        if let br = decoded.base_resp, br.status_code != 0 {
+            throw MiniMaxError.api(status: br.status_code,
+                                   message: br.status_msg ?? "video submit failed")
+        }
+        guard let taskId = decoded.task_id, !taskId.isEmpty else {
+            throw MiniMaxError.badResponse("missing task_id")
+        }
+        return taskId
+    }
+
+    /// GET /v1/query/video_generation?task_id=...
+    func queryVideo(apiKey: String, taskId: String) async throws -> MiniMaxVideoQuery {
+        guard let url = URL(string: "\(baseURL)/v1/query/video_generation?task_id=\(taskId)") else {
+            throw MiniMaxError.badURL
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 60
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try Self.checkHTTP(response, data: data)
+        let decoded = try JSONDecoder().decode(MiniMaxVideoQuery.self, from: data)
+        if let br = decoded.base_resp, br.status_code != 0 {
+            throw MiniMaxError.api(status: br.status_code,
+                                   message: br.status_msg ?? "video query failed")
+        }
+        return decoded
+    }
+
+    /// GET /v1/files/retrieve?file_id=... Returns the download URL.
+    func retrieveFileURL(apiKey: String, fileId: String) async throws -> String {
+        guard let url = URL(string: "\(baseURL)/v1/files/retrieve?file_id=\(fileId)") else {
+            throw MiniMaxError.badURL
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 60
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try Self.checkHTTP(response, data: data)
+        let decoded = try JSONDecoder().decode(MiniMaxFileRetrieve.self, from: data)
+        if let br = decoded.base_resp, br.status_code != 0 {
+            throw MiniMaxError.api(status: br.status_code,
+                                   message: br.status_msg ?? "file retrieve failed")
+        }
+        guard let dl = decoded.file?.download_url, !dl.isEmpty else {
+            throw MiniMaxError.badResponse("missing download_url")
+        }
+        return dl
+    }
+
+    /// Downloads a video file to `dest`.
+    @discardableResult
+    func downloadVideo(_ urlString: String, to dest: URL) async throws -> URL {
+        guard let u = URL(string: urlString) else { throw MiniMaxError.badResponse("invalid video URL") }
+        let (tmp, response) = try await URLSession.shared.download(from: u)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            try? FileManager.default.removeItem(at: tmp)
+            throw MiniMaxError.http(http.statusCode, "video download failed")
+        }
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.moveItem(at: tmp, to: dest)
+        return dest
+    }
+
+    /// Submits a video task, polls until it finishes, then downloads it to `dest`.
+    /// `Task.sleep` propagates cancellation, so wrapping this in a cancellable
+    /// task gives cancel support.
+    func generateVideoAndWait(
+        apiKey: String,
+        model: String,
+        prompt: String,
+        firstFrameImage: String? = nil,
+        duration: Int? = nil,
+        resolution: String? = nil,
+        dest: URL,
+        pollSeconds: Int = 10,
+        maxWaitSeconds: Int = 1500,
+        onStatus: (@Sendable (String) -> Void)? = nil
+    ) async throws -> URL {
+        let taskId = try await videoGenerate(apiKey: apiKey, model: model, prompt: prompt,
+                                             firstFrameImage: firstFrameImage,
+                                             duration: duration, resolution: resolution)
+        onStatus?("Submitted video task…")
+        let deadline = Date().addingTimeInterval(TimeInterval(maxWaitSeconds))
+        while true {
+            try await Task.sleep(nanoseconds: UInt64(pollSeconds) * 1_000_000_000)
+            if Date() > deadline { throw MiniMaxError.timeout }
+            let q = try await queryVideo(apiKey: apiKey, taskId: taskId)
+            let status = q.status ?? ""
+            onStatus?("Video \(status)…")
+            if status == "Fail" {
+                throw MiniMaxError.api(status: q.base_resp?.status_code ?? -1,
+                                       message: "video generation failed")
+            }
+            if status == "Success" {
+                guard let fileId = q.file_id else { throw MiniMaxError.badResponse("missing file_id") }
+                let dl = try await retrieveFileURL(apiKey: apiKey, fileId: fileId)
+                return try await downloadVideo(dl, to: dest)
+            }
+        }
+    }
+
+    /// Shared HTTP status check.
+    private static func checkHTTP(_ response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else { throw MiniMaxError.badResponse("no HTTP response") }
+        guard http.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw MiniMaxError.http(http.statusCode, String(body.prefix(200)))
+        }
+    }
+}
+
+/// Response for POST /v1/video_generation.
+struct MiniMaxVideoTask: Codable, Sendable {
+    var task_id: String?
+    var base_resp: MiniMaxImageResult.BaseResp?
+}
+
+/// Response for GET /v1/query/video_generation.
+struct MiniMaxVideoQuery: Codable, Sendable {
+    var status: String?
+    var file_id: String?
+    var base_resp: MiniMaxImageResult.BaseResp?
+}
+
+/// Response for GET /v1/files/retrieve.
+struct MiniMaxFileRetrieve: Codable, Sendable {
+    struct FileInfo: Codable, Sendable {
+        var download_url: String?
+        var filename: String?
+    }
+    var file: FileInfo?
+    var base_resp: MiniMaxImageResult.BaseResp?
 }
 
 /// Generic envelope used where only `base_resp` matters.
@@ -121,6 +280,8 @@ enum MiniMaxError: LocalizedError {
     case badURL
     case api(status: Int, message: String)
     case noImages
+    case noVideo
+    case timeout
     case badResponse(String)
     case http(Int, String)
 
@@ -132,6 +293,10 @@ enum MiniMaxError: LocalizedError {
             return "MiniMax error \(status): \(message)"
         case .noImages:
             return "MiniMax returned no images."
+        case .noVideo:
+            return "MiniMax returned no video."
+        case .timeout:
+            return "MiniMax video generation timed out."
         case .badResponse(let head):
             return "Could not parse MiniMax response: \(head)"
         case .http(let code, let body):

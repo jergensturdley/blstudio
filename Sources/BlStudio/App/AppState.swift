@@ -22,6 +22,7 @@ final class AppState {
     @ObservationIgnored var generate: GenerateModel!
     @ObservationIgnored var edit: EditModel!
     @ObservationIgnored var chat: ChatModel!
+    @ObservationIgnored var video: VideoModel!
     @ObservationIgnored var quota: QuotaModel!
 
     init() {
@@ -29,6 +30,7 @@ final class AppState {
         generate = GenerateModel(app: self)
         edit = EditModel(app: self)
         chat = ChatModel(app: self)
+        video = VideoModel(app: self)
         quota = QuotaModel(app: self)
     }
 
@@ -600,6 +602,204 @@ final class EditModel {
             return ImageGenerationResult(urls: urls, saved: saved, total: total,
                                          task_id: nil,
                                          task_ids: taskIds.isEmpty ? nil : taskIds)
+        }
+    }
+}
+
+// MARK: - Video
+
+@MainActor
+@Observable
+final class VideoModel {
+    @ObservationIgnored unowned let app: AppState
+
+    /// "bailian" or "minimax".
+    var provider: String = KeyProvider.bailian.rawValue
+    /// "t2v" or "i2v".
+    var mode: String = "t2v"
+    var prompt: String = ""
+    var model: String = ""
+    var imageURL: String = ""          // i2v source for Bailian (must be a URL)
+    var i2vFileURL: URL? = nil         // i2v source for MiniMax (local file)
+    var resolution: String = "1080P"
+    var ratio: String = "16:9"
+    var duration: Int = 5
+    var seedEnabled = false
+    var seedText: String = ""
+    var promptExtend: Bool? = nil
+    var watermark: Bool? = false
+
+    var phase: GenPhase = .idle
+    var progressLine: String = ""
+    var lastSavedPath: String? = nil
+
+    init(app: AppState) { self.app = app }
+
+    var isMiniMax: Bool { provider == KeyProvider.minimax.rawValue }
+
+    var canRun: Bool {
+        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && phase != .running
+    }
+
+    func randomizeSeed() {
+        seedText = String(Int.random(in: 0...2_147_483_647))
+        seedEnabled = true
+    }
+
+    func generate() async {
+        if isMiniMax {
+            await generateMiniMax()
+        } else {
+            await generateBailian()
+        }
+    }
+
+    private func generateBailian() async {
+        guard canRun else { return }
+        let seedValue: Int?
+        do {
+            seedValue = try parseSeed(enabled: seedEnabled, text: seedText)
+        } catch {
+            phase = .failed(error.localizedDescription)
+            return
+        }
+
+        phase = .running
+        progressLine = "Starting…"
+        lastSavedPath = nil
+
+        let settings = app.settingsStore.settings
+        let outDir = settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let promptText = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outPath = outDir.appendingPathComponent("\(AppState.outPrefix(for: prompt, kind: "vid")).mp4")
+
+        var req = VideoGenRequest(prompt: promptText)
+        req.imageURL = mode == "i2v" ? imageURL.nonEmptyOrNil : nil
+        req.model = model.nonEmptyOrNil
+        req.resolution = resolution.nonEmptyOrNil
+        req.ratio = ratio.nonEmptyOrNil
+        req.duration = duration
+        req.seed = seedValue
+        req.promptExtend = promptExtend
+        req.watermark = watermark
+
+        let started = Date()
+        do {
+            let out = try await app.client.videoGenerate(
+                req, outPath: outPath, apiKey: app.activeSecret,
+                pollInterval: max(3, settings.pollInterval),
+                timeoutSeconds: settings.requestTimeout,
+                onProgress: { [weak self] line in
+                    Task { @MainActor in self?.progressLine = line }
+                })
+            guard FileManager.default.fileExists(atPath: outPath.path) else {
+                throw NSError(domain: "BlStudio", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "bl finished but no video file was saved.",
+                ])
+            }
+            let decoded = try? BLClient.decode(VideoGenerationResult.self, from: out)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPath = outPath.path
+            phase = .done
+            app.recordUsage(kind: .videoGenerate, model: req.model ?? "video",
+                            durationMs: ms, ok: true)
+            app.history.add(HistoryEntry(
+                kind: .videoGenerate, prompt: promptText, model: req.model,
+                keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
+                savedPaths: [outPath.path],
+                remoteUrls: (decoded?.video_url).map { [$0] } ?? [],
+                taskId: decoded?.task_id,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .videoGenerate, model: req.model ?? "video",
+                            durationMs: ms, ok: false)
+            app.history.add(HistoryEntry(
+                kind: .videoGenerate, prompt: promptText, model: req.model,
+                keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    private func generateMiniMax() async {
+        guard canRun else { return }
+        guard let apiKey = app.miniMaxSecret else {
+            phase = .failed("No MiniMax API key configured. Add one in the API Keys tab and set its provider to MiniMax.")
+            return
+        }
+
+        phase = .running
+        progressLine = "Contacting MiniMax…"
+        lastSavedPath = nil
+
+        let promptText = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let dest = outDir.appendingPathComponent("\(AppState.outPrefix(for: prompt, kind: "vid")).mp4")
+
+        // MiniMax accepts the first frame as a URL or a data: URI.
+        var firstFrame: String? = nil
+        if mode == "i2v" {
+            if let f = i2vFileURL, let data = try? Data(contentsOf: f) {
+                let mime: String
+                switch f.pathExtension.lowercased() {
+                case "png": mime = "image/png"
+                case "webp": mime = "image/webp"
+                case "gif": mime = "image/gif"
+                default: mime = "image/jpeg"
+                }
+                firstFrame = "data:\(mime);base64," + data.base64EncodedString()
+            } else {
+                firstFrame = imageURL.nonEmptyOrNil
+            }
+        }
+
+        let effectiveModel: String
+        if !model.trimmingCharacters(in: .whitespaces).isEmpty {
+            effectiveModel = model
+        } else {
+            effectiveModel = mode == "i2v" ? "I2V-01" : "MiniMax-Hailuo-2.3"
+        }
+        let isHailuo = effectiveModel.contains("Hailuo")
+        let displayModel = "MiniMax \(effectiveModel)"
+
+        let started = Date()
+        do {
+            let saved = try await app.minimax.generateVideoAndWait(
+                apiKey: apiKey,
+                model: effectiveModel,
+                prompt: promptText,
+                firstFrameImage: firstFrame,
+                duration: isHailuo ? duration : nil,
+                resolution: isHailuo ? resolution : nil,
+                dest: dest,
+                pollSeconds: 10,
+                onStatus: { [weak self] line in
+                    Task { @MainActor in self?.progressLine = line }
+                })
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPath = saved.path
+            phase = .done
+            app.recordUsage(kind: .videoGenerate, model: displayModel,
+                            durationMs: ms, ok: true, keyIdOverride: app.miniMaxKeyId)
+            app.history.add(HistoryEntry(
+                kind: .videoGenerate, prompt: promptText, model: displayModel,
+                keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
+                savedPaths: [saved.path], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .videoGenerate, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: app.miniMaxKeyId)
+            app.history.add(HistoryEntry(
+                kind: .videoGenerate, prompt: promptText, model: displayModel,
+                keyId: app.miniMaxKeyId, keyLabel: app.miniMaxKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
         }
     }
 }

@@ -6,8 +6,9 @@
 BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)). It drives Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps that CLI in a friendly GUI focused on:
 
 - **Image generation**. Prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible. A dice button fills in a random seed, and the watermark is off by default.
-- **Two image providers**. Generate through Alibaba Bailian (via the `bl` CLI) or MiniMax (`image-01`, called over HTTP so no `bl` needed). Switch provider per generation. MiniMax returns up to 9 images in a single request and uses fixed aspect ratios.
+- **Two providers**. Generate through Alibaba Bailian (via the `bl` CLI) or MiniMax (called over HTTP, so no `bl` needed), for both images and video. Switch provider per job. MiniMax returns up to 9 images in a single request with fixed aspect ratios, and renders video with its Hailuo models.
 - **Image editing**. Drop source images, describe the edit, get results back.
+- **Video generation**. Text-to-video and image-to-video through Bailian (`bl video generate`) or MiniMax Hailuo, with resolution, aspect ratio, duration, and seed controls, live progress, an inline player, and results saved to your library folder.
 - **Easy prompting**. Saved favorite prompts and saved negative prompts, one-click style suffixes, an Enhance-with-AI button that rewrites your prompt with a Qwen text model, and quick chat for iterating further.
 - **Image receiving**. Generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
 - **Quota tracking per API key**. Every request is logged locally per key (images, edits, chats, tokens, failures, daily chart). Account-level free-tier quotas and RPM/TPM rate limits are pulled from `bl usage free` / `bl quota check` when your console session is logged in.
@@ -16,7 +17,7 @@ BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](
 
 - macOS 14+
 - Swift 6 toolchain (Xcode 16+ or Command Line Tools)
-- `bl` installed and authenticated (`bl auth login`), e.g. `npm i -g bailian-cli`. Required for the Bailian provider and for Chat/Edit/Quota; the MiniMax image provider works without `bl`.
+- `bl` installed and authenticated (`bl auth login`), e.g. `npm i -g bailian-cli`. Required for the Bailian provider and for Chat/Edit/Quota; the MiniMax provider (image and video) works without `bl`.
 
 ## Build & run
 
@@ -61,6 +62,7 @@ The version embedded in `Info.plist` is derived from the tag (`v1.2.0` → `1.2.
 | --- | --- |
 | **Generate** | Text-to-image via the Bailian CLI or the MiniMax API. Pick a provider, then a model, aspect ratio or pixel size, and image count. Bailian supports 1–6 images with optional seed/negative prompt and prompt-extend & watermark toggles (watermark defaults to off). MiniMax returns 1–9 images per request with fixed aspect ratios. Style chips append curated suffixes to your prompt; a dice button sets a random seed, and Enhance with AI rewrites your prompt. |
 | **Edit** | Image-to-image via `bl image edit`. Drag & drop or pick source images (local files or URLs), describe the change, optionally choose an edit function for `wanx*-imageedit` models. |
+| **Video** | Text-to-video and image-to-video. Bailian runs `bl video generate` (happyhorse / wan2.6 models) with resolution, aspect ratio, duration, seed, and watermark controls. MiniMax runs Hailuo over HTTP with duration and resolution; image-to-video uses a local first frame or an image URL. Results play inline and are saved to your library folder. |
 | **Chat** | `bl text chat` with a transcript, system prompt, and per-reply token usage. Handy for prompt brainstorming. |
 | **Gallery** | History of every generation/edit with search & filters. Detail view offers Open/Copy/Reveal, **Use as edit source**, and **Describe** (runs `bl vision describe`). |
 | **Quota** | Per-key local usage cards (images, edits, chats, tokens, 14-day chart) + account free-tier quota and rate-limit tables refreshed from the console. |
@@ -81,6 +83,7 @@ Two layers, because Bailian quota lives in two places:
 BlStudio never talks to the network itself for generation. It shells out to the `bl` binary (`~/.local/bin/bl`, `/opt/homebrew/bin/bl`, `/usr/local/bin/bl`, or `$PATH`, override in Settings) with `--output json` and parses the CLI's JSON contracts:
 
 - `image generate/edit` → `{urls, saved, total, task_id(s)}`
+- `video generate` → polls and saves the finished `.mp4` itself (`--download`)
 - `text chat` → OpenAI-compatible completion envelope with `usage`
 - `usage free`, `quota check`, `quota list`, `auth status`, `config list`
 - errors arrive as `{"error": {code, message, hint}}` and surface with the hint text
@@ -106,4 +109,5 @@ Tools/       icon generator, Info.plist template
 - `usage free` / `quota check` reflect the active `bl` profile's console session, not arbitrary API keys. Per-key numbers come from the local ledger.
 - MiniMax `image-01` has no seed, negative-prompt, or watermark settings, so those controls are disabled when MiniMax is selected. MiniMax images are delivered as JPEG (1024px at the default resolution) and are logged to the same per-key usage ledger.
 - App Transport Security allows arbitrary loads because some image CDNs serve results over plain HTTP.
-- Video, speech, and other `bl` capabilities aren't wrapped yet. The Chat tab plus a terminal cover the rest.
+- MiniMax Hailuo video accepts duration and resolution only on Hailuo models; renders take a few minutes and are polled automatically. MiniMax image-to-video takes a local first frame (sent as a data URI), while Bailian image-to-video needs a publicly reachable image URL.
+- Speech and other `bl` capabilities aren't wrapped yet. The Chat tab plus a terminal cover the rest.

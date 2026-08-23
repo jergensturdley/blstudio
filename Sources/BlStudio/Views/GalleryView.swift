@@ -27,6 +27,7 @@ struct GalleryView: View {
                     Text("All").tag(WorkKind?.none)
                     Text("Generated").tag(WorkKind?.some(.imageGenerate))
                     Text("Edited").tag(WorkKind?.some(.imageEdit))
+                    Text("Video").tag(WorkKind?.some(.videoGenerate))
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 280)
@@ -74,9 +75,15 @@ struct GalleryCell: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topLeading) {
                 if let path = entry.savedPaths.first {
-                    ThumbImage(path: path)
-                        .frame(height: 170)
-                        .frame(maxWidth: .infinity)
+                    if entry.kind == .videoGenerate {
+                        VideoCellPreview(path: path)
+                            .frame(height: 170)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        ThumbImage(path: path)
+                            .frame(height: 170)
+                            .frame(maxWidth: .infinity)
+                    }
                 } else {
                     ZStack {
                         Rectangle().fill(.quaternary)
@@ -85,7 +92,7 @@ struct GalleryCell: View {
                     }
                     .frame(height: 170)
                 }
-                Text(entry.kind == .imageEdit ? "edit" : "gen")
+                Text(entry.kind == .imageEdit ? "edit" : (entry.kind == .videoGenerate ? "video" : "gen"))
                     .font(.caption2)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -128,8 +135,11 @@ struct GalleryDetailSheet: View {
             }
 
             HStack(alignment: .top, spacing: 16) {
-                if let path = entry.savedPaths.first,
-                   let nsImage = NSImage(contentsOfFile: path) {
+                if entry.kind == .videoGenerate, let path = entry.savedPaths.first {
+                    VideoPlayerCard(path: path)
+                        .frame(maxWidth: 420)
+                } else if let path = entry.savedPaths.first,
+                          let nsImage = NSImage(contentsOfFile: path) {
                     Image(nsImage: nsImage)
                         .resizable()
                         .scaledToFit()

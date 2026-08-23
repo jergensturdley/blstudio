@@ -147,6 +147,28 @@ struct ImageEditRequest: Sendable {
     var watermark: Bool? = nil
 }
 
+struct VideoGenRequest: Sendable {
+    var prompt: String
+    var imageURL: String? = nil        // image-to-video source (URL for Bailian)
+    var model: String? = nil
+    var resolution: String? = nil      // e.g. "1080P"
+    var ratio: String? = nil           // e.g. "16:9"
+    var duration: Int? = nil           // seconds
+    var seed: Int? = nil
+    var negativePrompt: String? = nil
+    var promptExtend: Bool? = nil
+    var watermark: Bool? = nil
+}
+
+/// Best-effort decode of `bl video generate --output json` on completion.
+struct VideoGenerationResult: Codable, Sendable {
+    var task_id: String?
+    var video_url: String?
+    var status: String?
+    var saved: String?
+    var size: String?
+}
+
 struct ChatRequest: Sendable {
     var message: String
     var model: String? = nil
@@ -160,6 +182,7 @@ struct ChatRequest: Sendable {
 enum WorkKind: String, Codable, Sendable, CaseIterable {
     case imageGenerate = "image generate"
     case imageEdit = "image edit"
+    case videoGenerate = "video generate"
     case chat = "text chat"
     case vision = "vision describe"
 }
