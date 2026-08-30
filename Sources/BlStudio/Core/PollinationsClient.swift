@@ -63,3 +63,36 @@ enum PollinationsError: LocalizedError {
         }
     }
 }
+
+// MARK: - Public model catalog
+
+/// Pulls the live model catalog from Pollinations' public `/models` endpoint.
+/// The endpoint is keyless; the catalog is a JSON array of strings. Used by
+/// the Generate tab's "Refresh models" button.
+enum PollinationsModelCatalog {
+    static let modelsURL = URL(string: "https://image.pollinations.ai/models")!
+
+    static func fetch(timeoutSeconds: TimeInterval = 15) async throws -> [String] {
+        var req = URLRequest(url: modelsURL)
+        req.timeoutInterval = timeoutSeconds
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw PollinationsError.http(code)
+        }
+        // Some deployments wrap the list in `{models: [...]}` or return a bare
+        // array; accept either.
+        if let arr = try? JSONDecoder().decode([String].self, from: data) {
+            return arr
+        }
+        if let obj = try? JSONDecoder().decode(Wrapper.self, from: data) {
+            return obj.models
+        }
+        let preview = String(data: data.prefix(160), encoding: .utf8) ?? ""
+        throw PollinationsError.badResponse(preview)
+    }
+
+    private struct Wrapper: Decodable {
+        var models: [String]
+    }
+}

@@ -52,6 +52,7 @@ bundle: icon
 	if [ -f dist/AppIcon.icns ]; then cp dist/AppIcon.icns "$(APP)/Contents/Resources/AppIcon.icns"; fi
 	sed "s/__VERSION__/$(VERSION)/" Tools/Info.plist > "$(APP)/Contents/Info.plist"
 	printf 'APPL????' > "$(APP)/Contents/PkgInfo"
+	$(MAKE) codesign
 	@echo "Bundled $(APP)"
 
 run: app
@@ -68,12 +69,16 @@ selftest: build
 	"$(BIN)" --viewprobe
 
 codesign:
-	codesign --force --sign - --options runtime "$(APP)"
-	@echo "Ad-hoc signed $(APP)"
+	@if security find-identity -v -p codesigning 2>/dev/null | grep -q '"BlStudio Local Sign"'; then \
+		codesign --force --sign "BlStudio Local Sign" --options runtime -r '=designated => identifier "dev.blstudio.app";' "$(APP)"; \
+		echo "Signed $(APP) with the local code-signing certificate"; \
+	else \
+		codesign --force --sign - --options runtime -r '=designated => identifier "dev.blstudio.app";' "$(APP)"; \
+		echo "Ad-hoc signed $(APP) (stable identifier requirement)"; \
+	fi
 
 zip: universal
 	$(MAKE) bundle BIN="$(UBIN)" VERSION="$(VERSION)"
-	$(MAKE) codesign
 	rm -f dist/BlStudio-macos.zip
 	cd dist && ditto -c -k --sequesterRsrc --keepParent BlStudio.app BlStudio-macos.zip
 	@echo "Created dist/BlStudio-macos.zip"

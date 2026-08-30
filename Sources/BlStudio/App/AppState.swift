@@ -13,9 +13,10 @@ final class AppState {
     let fish = FishClient()
     let cloudflare = CloudflareClient()
     let huggingface = HuggingFaceClient()
+    let metaMuse = MetaMuseClient()
     let mmx = MmxClient()
     @ObservationIgnored let settingsStore = SettingsStore()
-    @ObservationIgnored let keysStore = KeysStore()
+    @ObservationIgnored lazy var keysStore = KeysStore(settings: settingsStore)
     @ObservationIgnored let ledger = UsageLedger()
     @ObservationIgnored let history = HistoryStore()
     @ObservationIgnored let prompts = PromptLibrary()
@@ -57,10 +58,12 @@ final class AppState {
         authStatus = await a
     }
 
-    /// Currently selected API key secret (nil → CLI default profile).
-    var activeSecret: String? { keysStore.activeSecret }
-    var activeKeyId: UUID? { keysStore.activeKeyId }
-    var activeKeyLabel: String { keysStore.activeLabel() }
+    /// Bailian (bl CLI) key resolution — used by chat, edit, image/video that
+    /// go through the Bailian provider. Pickable from Settings.
+    var bailianConfigured: Bool { keysStore.bailianConfigured }
+    var bailianSecret: String? { keysStore.activeBailianSecret }
+    var bailianKeyId: UUID? { keysStore.activeBailianMeta?.id }
+    var bailianKeyLabel: String { keysStore.activeBailianLabel() }
 
     /// MiniMax key resolution (independent of the Bailian active key).
     var miniMaxConfigured: Bool { keysStore.miniMaxConfigured }
@@ -94,6 +97,12 @@ final class AppState {
     var huggingFaceKeyId: UUID? { keysStore.activeHuggingFaceMeta?.id }
     var huggingFaceKeyLabel: String { keysStore.activeHuggingFaceLabel() }
 
+    /// Meta Muse Image key resolution.
+    var metaMuseConfigured: Bool { keysStore.metaMuseConfigured }
+    var metaMuseSecret: String? { keysStore.activeMetaMuseSecret }
+    var metaMuseKeyId: UUID? { keysStore.activeMetaMuseMeta?.id }
+    var metaMuseKeyLabel: String { keysStore.activeMetaMuseLabel() }
+
     /// Provider on/off switches from Settings.
     func isProviderEnabled(_ p: KeyProvider) -> Bool {
         settingsStore.isProviderEnabled(p)
@@ -103,7 +112,7 @@ final class AppState {
                      promptTokens: Int = 0, completionTokens: Int = 0,
                      durationMs: Int, ok: Bool, keyIdOverride: UUID? = nil) {
         ledger.record(UsageEvent(
-            keyId: keyIdOverride ?? keysStore.activeKeyId,
+            keyId: keyIdOverride ?? keysStore.activeBailianMeta?.id,
             kind: kind, model: model, at: Date(),
             images: images, promptTokens: promptTokens,
             completionTokens: completionTokens,
@@ -171,6 +180,17 @@ final class GenerateModel {
     /// Which backend generates images: "bailian" (bl CLI) or "minimax" (native HTTP).
     var provider: String = KeyProvider.bailian.rawValue
     var activePresets: Set<String> = []
+
+    /// When non-nil, the Model picker suggestion list comes from a manual
+    /// "Refresh models" fetch instead of the static catalog. Cleared when the
+    /// user switches providers.
+    var refreshedModels: [String]? = nil
+    /// Source label for the most recent refresh (e.g. "bl model list (IG)").
+    var refreshedModelsSource: String = ""
+    /// Error from the most recent failed refresh (cleared on success).
+    var refreshedModelsError: String? = nil
+    /// True while a refresh is in flight; the Refresh button shows a spinner.
+    var isRefreshingModels: Bool = false
 
     var phase: GenPhase = .idle
     var progressLine: String = ""
@@ -242,7 +262,7 @@ final class GenerateModel {
 
         let started = Date()
         do {
-            let completion = try await app.client.textChat(req, apiKey: app.activeSecret)
+            let completion = try await app.client.textChat(req, apiKey: app.bailianSecret)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             app.recordUsage(kind: .chat, model: req.model,
                             promptTokens: completion.usage?.prompt_tokens ?? 0,
@@ -270,6 +290,7 @@ final class GenerateModel {
     var isGemini: Bool { provider == KeyProvider.gemini.rawValue }
     var isCloudflare: Bool { provider == KeyProvider.cloudflare.rawValue }
     var isHuggingFace: Bool { provider == KeyProvider.huggingface.rawValue }
+    var isMeta: Bool { provider == KeyProvider.meta.rawValue }
 
     func generate() async {
         if isMiniMax {
@@ -290,6 +311,10 @@ final class GenerateModel {
         }
         if isHuggingFace {
             await generateHuggingFace()
+            return
+        }
+        if isMeta {
+            await generateMetaMuse()
             return
         }
         guard canRun else { return }
@@ -327,7 +352,7 @@ final class GenerateModel {
                 result = try await app.client.imageGenerate(
                     req, outDir: outDir,
                     outPrefix: AppState.outPrefix(for: prompt, kind: "img"),
-                    apiKey: app.activeSecret,
+                    apiKey: app.bailianSecret,
                     pollInterval: settings.pollInterval,
                     timeoutSeconds: settings.requestTimeout,
                     onProgress: { [weak self] line in
@@ -347,7 +372,7 @@ final class GenerateModel {
                             durationMs: ms, ok: true)
             app.history.add(HistoryEntry(
                 kind: .imageGenerate, prompt: composedPrompt, model: req.model,
-                keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
+                keyId: app.bailianKeyId, keyLabel: app.bailianKeyLabel,
                 savedPaths: result.saved, remoteUrls: result.urls,
                 taskId: result.task_id ?? result.task_ids?.first,
                 durationMs: ms, ok: true, detail: nil))
@@ -357,7 +382,7 @@ final class GenerateModel {
             app.recordUsage(kind: .imageGenerate, model: req.model, durationMs: ms, ok: false)
             app.history.add(HistoryEntry(
                 kind: .imageGenerate, prompt: composedPrompt, model: req.model,
-                keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
+                keyId: app.bailianKeyId, keyLabel: app.bailianKeyLabel,
                 savedPaths: [], remoteUrls: [], taskId: nil,
                 durationMs: ms, ok: false, detail: error.localizedDescription))
         }
@@ -574,7 +599,7 @@ final class GenerateModel {
         let ratio = ModelCatalog.freeAspectRatios.contains(size) ? size : "1:1"
         let (w, h) = ModelCatalog.pixelSize(forAspectRatio: ratio)
         let modelUsed = model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "@cf/black-forest-labs/FLUX.1-schnell" : model
+            ? "@cf/black-forest-labs/flux-1-schnell" : model
         let displayModel = "Cloudflare \(modelUsed)"
         let promptText = composedPrompt
 
@@ -604,7 +629,8 @@ final class GenerateModel {
                 let dest = outDir.appendingPathComponent("\(prefix)-\(i + 1).png")
                 let url = try await app.cloudflare.generate(
                     apiKey: apiKey, accountId: accountId, model: modelUsed,
-                    prompt: promptText, width: w, height: h,
+                    prompt: promptText, negativePrompt: negativePrompt.nonEmptyOrNil,
+                    width: w, height: h,
                     seed: baseSeed.map { $0 + i }, dest: dest)
                 saved.append(url.path)
             }
@@ -643,7 +669,7 @@ final class GenerateModel {
         let ratio = ModelCatalog.freeAspectRatios.contains(size) ? size : "1:1"
         let (w, h) = ModelCatalog.pixelSize(forAspectRatio: ratio)
         let modelUsed = model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "black-forest-labs/FLUX.1-schnell" : model
+            ? "black-forest-labs/FLUX.2-klein-4B" : model
         let displayModel = "Hugging Face \(modelUsed)"
         let promptText = composedPrompt
 
@@ -660,12 +686,25 @@ final class GenerateModel {
         do {
             var saved: [String] = []
             let total = max(1, count)
+            let providers = HuggingFaceClient.providerOrder(model: modelUsed,
+                                                            explicit: app.huggingFaceProvider)
             for i in 0..<total {
                 progressLine = "Generating image \(i + 1)/\(total)…"
                 let dest = outDir.appendingPathComponent("\(prefix)-\(i + 1).png")
-                let url = try await app.huggingface.generate(
-                    apiKey: apiKey, provider: app.huggingFaceProvider, model: modelUsed,
-                    prompt: promptText, width: w, height: h, dest: dest)
+                var lastError: Error?
+                var got: URL?
+                for p in providers {
+                    do {
+                        got = try await app.huggingface.generate(
+                            apiKey: apiKey, provider: p, model: modelUsed,
+                            prompt: promptText, width: w, height: h, dest: dest)
+                        break
+                    } catch {
+                        lastError = error
+                        progressLine = "Provider \(p) failed, trying next…"
+                    }
+                }
+                guard let url = got else { throw lastError ?? HuggingFaceError.badResponse("no provider succeeded") }
                 saved.append(url.path)
             }
             let ms = Int(Date().timeIntervalSince(started) * 1000)
@@ -691,6 +730,63 @@ final class GenerateModel {
         }
     }
 
+    /// Generates images through Meta Muse Image (Meta Model API, $0.01/image).
+    /// The aspect ratio is sent as a `WxH` size hint; the model renders at its
+    /// own native resolution. No seed support on the public images endpoint.
+    private func generateMetaMuse() async {
+        guard canRun else { return }
+        guard let apiKey = app.metaMuseSecret else {
+            phase = .failed("No Meta Muse API key configured. Add one in the API Keys tab with provider Meta Muse Image.")
+            return
+        }
+        let ratio = ModelCatalog.freeAspectRatios.contains(size) ? size : "1:1"
+        let sizeHint = MetaMuseClient.size(forAspectRatio: ratio)
+        let displayModel = "Meta Muse \(MetaMuseClient.imageModel)"
+        let promptText = composedPrompt
+
+        phase = .running
+        progressLine = "Contacting Meta Muse…"
+        lastResult = nil
+        lastSavedPaths = []
+
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let prefix = AppState.outPrefix(for: prompt, kind: "img")
+        let started = Date()
+
+        do {
+            var saved: [String] = []
+            let total = max(1, count)
+            for i in 0..<total {
+                progressLine = "Generating image \(i + 1)/\(total)…"
+                let dest = outDir.appendingPathComponent("\(prefix)-\(i + 1).webp")
+                _ = try await app.metaMuse.generate(
+                    apiKey: apiKey, prompt: promptText, n: 1, size: sizeHint, dest: dest)
+                saved.append(dest.path)
+            }
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPaths = saved
+            phase = .done
+            app.recordUsage(kind: .imageGenerate, model: displayModel, images: saved.count,
+                            durationMs: ms, ok: true, keyIdOverride: app.metaMuseKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.metaMuseKeyId, keyLabel: app.metaMuseKeyLabel,
+                savedPaths: saved, remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .imageGenerate, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: app.metaMuseKeyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: app.metaMuseKeyId, keyLabel: app.metaMuseKeyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
     /// Several image models (incl. the default qwen-image-3.0) ignore the batch
     /// parameter `n` and return a single image per request. To honor the requested
     /// count anyway, run N parallel single-image requests. This is the same approach as
@@ -705,7 +801,7 @@ final class GenerateModel {
         timeoutSeconds: Int
     ) async throws -> ImageGenerationResult {
         let basePrefix = AppState.outPrefix(for: prompt, kind: "img")
-        let apiKey = app.activeSecret
+        let apiKey = app.bailianSecret
         let client = app.client
 
         return try await withThrowingTaskGroup(of: (Int, ImageGenerationResult).self) { group in
@@ -754,6 +850,86 @@ final class GenerateModel {
 
     private var composedPrompt: String {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Model list refresh
+
+    /// Which providers support a runtime "Refresh models" fetch. Pollinations
+    /// is included even though it's keyless (it has a public `/models` list).
+    static let refreshableProviders: Set<KeyProvider> = [
+        .bailian, .pollinations, .huggingface,
+    ]
+
+    /// Returns true when the Generate tab should show a refresh button for the
+    /// currently selected provider.
+    var canRefreshModels: Bool {
+        guard let p = KeyProvider(rawValue: provider) else { return false }
+        return Self.refreshableProviders.contains(p)
+    }
+
+    /// Fetches the model list for the currently selected provider and caches
+    /// it on `refreshedModels`. The model's currently typed text is left
+    /// untouched. On failure the previous list is kept and `refreshedModelsError`
+    /// surfaces the message.
+    func refreshModels() async {
+        guard !isRefreshingModels else { return }
+        guard let p = KeyProvider(rawValue: provider) else { return }
+        guard Self.refreshableProviders.contains(p) else { return }
+        isRefreshingModels = true
+        refreshedModelsError = nil
+        defer { isRefreshingModels = false }
+        do {
+            let (ids, source) = try await fetchModels(for: p)
+            refreshedModels = ids
+            refreshedModelsSource = source
+        } catch {
+            refreshedModelsError = error.localizedDescription
+        }
+    }
+
+    /// Per-provider model list fetch. Returns the ids and a human-readable
+    /// source label for the inline status message under the picker.
+    private func fetchModels(for provider: KeyProvider) async throws -> ([String], String) {
+        switch provider {
+        case .bailian:
+            // Bailian: image-capable models from `bl model list --capability IG`.
+            // Falls back to `bl usage free`'s catalog when the model list endpoint
+            // is unreachable (e.g. console session expired); that's still better
+            // than an empty list.
+            let ids = try await app.client.listModels(capability: "IG")
+            return (ids, "bl model list (IG)")
+
+        case .pollinations:
+            // Keyless, public catalog.
+            return (try await PollinationsModelCatalog.fetch(), "pollinations.ai/models")
+
+        case .huggingface:
+            // Probe every router provider that the smoke test already covers,
+            // concatenate each provider's image-capable entries.
+            guard let secret = app.keysStore.activeSecret(for: provider) else {
+                throw NSError(domain: "BlStudio", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "No Hugging Face token configured."])
+            }
+            let providers = ["black-forest-labs", "fal-ai", "replicate", "novita",
+                             "hf-inference", "together", "nebius", "deepinfra"]
+            var combined: [String] = []
+            var seen = Set<String>()
+            for p in providers {
+                let models = (try? await app.huggingface.listModels(apiKey: secret, provider: p)) ?? []
+                for m in models where seen.insert(m).inserted {
+                    combined.append(m)
+                }
+            }
+            if combined.isEmpty {
+                throw NSError(domain: "BlStudio", code: 2,
+                              userInfo: [NSLocalizedDescriptionKey: "No HF providers returned a model list."])
+            }
+            return (combined, "Hugging Face inference providers")
+
+        default:
+            throw NSError(domain: "BlStudio", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Refresh not implemented for \(provider.label)."])
+        }
     }
 }
 
@@ -839,7 +1015,7 @@ final class EditModel {
                 result = try await app.client.imageEdit(
                     req, outDir: outDir,
                     outPrefix: AppState.outPrefix(for: prompt, kind: "edit"),
-                    apiKey: app.activeSecret,
+                    apiKey: app.bailianSecret,
                     pollInterval: settings.pollInterval,
                     timeoutSeconds: settings.requestTimeout,
                     onProgress: { [weak self] line in
@@ -858,7 +1034,7 @@ final class EditModel {
                             durationMs: ms, ok: true)
             app.history.add(HistoryEntry(
                 kind: .imageEdit, prompt: req.prompt, model: req.model,
-                keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
+                keyId: app.bailianKeyId, keyLabel: app.bailianKeyLabel,
                 savedPaths: result.saved, remoteUrls: result.urls,
                 taskId: result.task_id ?? result.task_ids?.first,
                 durationMs: ms, ok: true,
@@ -869,7 +1045,7 @@ final class EditModel {
             app.recordUsage(kind: .imageEdit, model: req.model, durationMs: ms, ok: false)
             app.history.add(HistoryEntry(
                 kind: .imageEdit, prompt: req.prompt, model: req.model,
-                keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
+                keyId: app.bailianKeyId, keyLabel: app.bailianKeyLabel,
                 savedPaths: [], remoteUrls: [], taskId: nil,
                 durationMs: ms, ok: false, detail: error.localizedDescription))
         }
@@ -886,7 +1062,7 @@ final class EditModel {
         timeoutSeconds: Int
     ) async throws -> ImageGenerationResult {
         let basePrefix = AppState.outPrefix(for: prompt, kind: "edit")
-        let apiKey = app.activeSecret
+        let apiKey = app.bailianSecret
         let client = app.client
 
         return try await withThrowingTaskGroup(of: (Int, ImageGenerationResult).self) { group in
@@ -1017,7 +1193,7 @@ final class VideoModel {
         let started = Date()
         do {
             let out = try await app.client.videoGenerate(
-                req, outPath: outPath, apiKey: app.activeSecret,
+                req, outPath: outPath, apiKey: app.bailianSecret,
                 pollInterval: max(3, settings.pollInterval),
                 timeoutSeconds: settings.requestTimeout,
                 onProgress: { [weak self] line in
@@ -1036,7 +1212,7 @@ final class VideoModel {
                             durationMs: ms, ok: true)
             app.history.add(HistoryEntry(
                 kind: .videoGenerate, prompt: promptText, model: req.model,
-                keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
+                keyId: app.bailianKeyId, keyLabel: app.bailianKeyLabel,
                 savedPaths: [outPath.path],
                 remoteUrls: (decoded?.video_url).map { [$0] } ?? [],
                 taskId: decoded?.task_id,
@@ -1048,7 +1224,7 @@ final class VideoModel {
                             durationMs: ms, ok: false)
             app.history.add(HistoryEntry(
                 kind: .videoGenerate, prompt: promptText, model: req.model,
-                keyId: app.activeKeyId, keyLabel: app.activeKeyLabel,
+                keyId: app.bailianKeyId, keyLabel: app.bailianKeyLabel,
                 savedPaths: [], remoteUrls: [], taskId: nil,
                 durationMs: ms, ok: false, detail: error.localizedDescription))
         }
@@ -1389,7 +1565,7 @@ final class ChatModel {
 
         let started = Date()
         do {
-            let completion = try await app.client.textChat(req, apiKey: app.activeSecret)
+            let completion = try await app.client.textChat(req, apiKey: app.bailianSecret)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             var reply = ChatMessage(role: .assistant, content: completion.content,
                                     model: completion.model)

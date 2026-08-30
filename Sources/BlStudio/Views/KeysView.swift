@@ -37,7 +37,7 @@ struct KeysView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Card(title: "API keys") {
-                    Text("Keys are stored in the macOS Keychain. Bailian keys are passed to bl via --api-key; when none is selected, BlStudio uses the active bl CLI profile. MiniMax keys are used directly for MiniMax image generation.")
+                    Text("Keys are stored in the macOS Keychain. Pick which key each provider uses in Settings → Per-provider API key (when a provider has more than one key). With no preference set, the first stored key of that provider is used.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -52,9 +52,6 @@ struct KeysView: View {
 
                     ForEach(keys.keys) { key in
                         HStack(spacing: 10) {
-                            Image(systemName: keys.activeKeyId == key.id
-                                  ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(keys.activeKeyId == key.id ? Color.accentColor : .secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
                                     Text(key.label).font(.callout.bold())
@@ -63,6 +60,11 @@ struct KeysView: View {
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 1)
                                         .background(Capsule().fill(key.isMiniMax ? Color.purple.opacity(0.18) : Color.accentColor.opacity(0.14)))
+                                    if app.settingsStore.preferredKeyId(for: key.resolvedProvider) == key.id {
+                                        Text("preferred for this provider")
+                                            .font(.caption2)
+                                            .foregroundStyle(.green)
+                                    }
                                 }
                                 Text(keyCaption(key))
                                     .font(.caption)
@@ -88,21 +90,12 @@ struct KeysView: View {
                             }
                             .disabled(testing != nil)
 
-                            Button {
-                                keys.activeKeyId = key.id
-                            } label: { Text("Select") }
-                            .disabled(keys.activeKeyId == key.id)
-
                             Button(role: .destructive) {
                                 keys.remove(key.id)
                             } label: { Image(systemName: "trash") }
                         }
                         .padding(10)
                         .background(RoundedRectangle(cornerRadius: 10).fill(.background.opacity(0.6)))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(keys.activeKeyId == key.id ? Color.accentColor.opacity(0.5) : .clear, lineWidth: 1)
-                        )
                     }
                 }
 
@@ -139,7 +132,7 @@ struct KeysView: View {
                         if newProvider == .huggingface {
                             GridRow {
                                 Text("Provider").foregroundStyle(.secondary)
-                                TextField("Inference provider (default: fal-ai)", text: $newAccountId)
+                                TextField("Inference provider override (blank: auto)", text: $newAccountId)
                                     .textFieldStyle(.roundedBorder)
                             }
                         }
@@ -246,6 +239,9 @@ struct KeysView: View {
                 testResult[key.id] = msg
             } else if key.isHuggingFace {
                 let msg = try await app.huggingface.validate(apiKey: secret)
+                testResult[key.id] = msg
+            } else if key.isMeta {
+                let msg = try await app.metaMuse.validate(apiKey: secret)
                 testResult[key.id] = msg
             } else {
                 var req = ChatRequest(message: "ping")

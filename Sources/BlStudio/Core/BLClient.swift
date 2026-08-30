@@ -107,6 +107,66 @@ final class BLClient: @unchecked Sendable {
         }
     }
 
+    /// Lists model ids from `bl model list`, filtered by capability code
+    /// (`IG` = image generation, `TG` = text generation, …). Pages through
+    /// `--page-size 50` until all items have been collected. Requires a
+    /// logged-in `bl` profile. Returns the ids in the order `bl` reported.
+    func listModels(capability: String, timeoutSeconds: Int = 60) async throws -> [String] {
+        var ids: [String] = []
+        var seen = Set<String>()
+        var page = 1
+        let pageSize = 50
+        var total: Int? = nil
+        while true {
+            let out = try await run(arguments: [
+                "model", "list",
+                "--capability", capability,
+                "--page", String(page),
+                "--page-size", String(pageSize),
+                "--quiet",
+            ], timeoutSeconds: timeoutSeconds)
+            guard let data = BLJSON.extract(out.stdout) else {
+                throw BLClientError.badOutput("bl model list returned no JSON (exit \(out.exitCode))")
+            }
+            let decoded = try JSONDecoder().decode(ModelListResponse.self, from: data)
+            if total == nil { total = decoded.total }
+            for item in decoded.items {
+                let id = item.model
+                if seen.insert(id).inserted { ids.append(id) }
+            }
+            // Stop once we've collected the advertised total, or the page came
+            // back short (server cap), or we've tried enough pages to be safe.
+            let stop = decoded.items.count < pageSize
+                || (total.map { ids.count >= $0 } ?? false)
+                || page > 20
+            if stop { break }
+            page += 1
+        }
+        return ids
+    }
+
+    private struct ModelListResponse: Decodable {
+        struct Item: Decodable {
+            var model: String
+            var name: String?
+            var provider: String?
+            var capabilities: [String]?
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                self.model = try c.decode(String.self, forKey: .model)
+                self.name = try c.decodeIfPresent(String.self, forKey: .name)
+                self.provider = try c.decodeIfPresent(String.self, forKey: .provider)
+                self.capabilities = try c.decodeIfPresent([String].self, forKey: .capabilities)
+            }
+            private enum CodingKeys: String, CodingKey {
+                case model, name, provider, capabilities
+            }
+        }
+        var total: Int
+        var items: [Item]
+    }
+
+
     /// Run a command expecting a JSON document on stdout, decoded into `T`.
     /// Detects the `{"error": ...}` envelope and maps it to `BLClientError.apiError`.
     func runJSON<T: Decodable>(

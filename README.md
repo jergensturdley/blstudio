@@ -33,6 +33,15 @@ make selftest     # headless smoke tests incl. live bl dry-run checks
 make test         # XCTest suite (needs full Xcode; falls back to selftest)
 ```
 
+There is also a live endpoint smoke test that runs inside the app binary (so
+it can read your Keychain keys without extra prompts):
+
+```sh
+dist/BlStudio.app/Contents/MacOS/BlStudio --smoketest        # free checks only
+dist/BlStudio.app/Contents/MacOS/BlStudio --smoketest full   # + one tiny paid probe per provider
+dist/BlStudio.app/Contents/MacOS/BlStudio --smoketest full minimax   # limit to one provider
+```
+
 You can also open `Package.swift` in Xcode and hit Run.
 
 > Sandboxed shells: SwiftPM's build sandbox may be unavailable; use
@@ -50,7 +59,7 @@ You still need the `bl` CLI installed and authenticated (see Requirements).
 ## Releases & CI
 
 - **CI** (`.github/workflows/ci.yml`) runs on every push/PR to `main`: release build, the XCTest suite (live `bl` integration tests auto-skip where the CLI is absent), the headless `--selftest`, and an offscreen `--viewprobe` render of every pane.
-- **Release** (`.github/workflows/release.yml`) runs when you push a tag matching `v*`. It builds a universal binary, bundles `BlStudio.app`, ad-hoc signs it with the hardened runtime, zips it, and publishes a GitHub Release with install notes.
+- **Release** (`.github/workflows/release.yml`) runs when you push a tag matching `v*`. It builds a universal binary, bundles `BlStudio.app`, ad-hoc signs it with the hardened runtime and a stable designated requirement (`identifier "dev.blstudio.app"`), zips it, and publishes a GitHub Release with install notes. The stable requirement is what lets the Keychain keep recognizing the app across updates, so stored API keys survive new releases.
 
 Cut a release with:
 
@@ -73,10 +82,10 @@ The version embedded in `Info.plist` is derived from the tag (`v1.2.0` → `1.2.
 | **Chat** | `bl text chat` with a transcript, system prompt, and per-reply token usage. Handy for prompt brainstorming. |
 | **Gallery** | History of every generation, edit, and video with search & filters. Click an image to open the full-size in-app viewer (zoom, pan, batch arrows, Describe, send-to-Edit). Videos play inline. |
 | **Quota** | Per-key local usage cards (images, edits, chats, tokens, 14-day chart) + account free-tier quota and rate-limit tables refreshed from the console + MiniMax token-plan quota per model via `mmx quota show`. |
-| **API Keys** | Store multiple API keys in the macOS Keychain, each tagged as Bailian, MiniMax, Google Gemini, Fish Audio, Cloudflare Workers AI, or Hugging Face, select the active one, and test them. Cloudflare keys also take an Account ID; Hugging Face keys take an inference provider name. Without a selected key, BlStudio uses the active `bl` profile. |
-| **Settings** | bl and mmx binary path overrides, image library folder, default size/models, timeouts, and on/off switches for each provider. Turning a provider off hides it from the Generate, Video, and Speech pickers. |
+| **API Keys** | Store multiple API keys in the macOS Keychain, each tagged as Bailian, MiniMax, Google Gemini, Fish Audio, Cloudflare Workers AI, Hugging Face, or Meta Muse Image, and test them. Cloudflare keys also take an Account ID; Hugging Face keys take an inference provider name. The first key added for each provider is used by default; pick a different one in Settings → Per-provider API key. |
+| **Settings** | bl and mmx binary path overrides, image library folder, default size/models, timeouts, on/off switches for each provider, and the per-provider API key picker. Turning a provider off hides it from the Generate, Video, and Speech pickers. |
 
-The key selected in the toolbar is passed to `bl` as `--api-key` for image/chat/vision calls.
+The provider selected in the Generate tab is what picks the key: it always uses the key marked preferred for that provider in Settings (falling back to the first stored key of that provider when no preference is set). The chosen key is passed to `bl` as `--api-key` for Bailian image/chat/vision calls.
 
 ### Quota tracking, precisely
 
@@ -123,14 +132,14 @@ Tools/       icon generator, Info.plist template
 ## Notes & limitations
 
 - Secrets live in the Keychain (`BlStudio` service); only masked prefixes are shown in the UI.
-- The app is unsigned/local-only by design; no App Sandbox (it needs to spawn the `bl`/`node` process and write to your Pictures folder).
+- The app is unsigned (ad-hoc) and local-only by design; no App Sandbox (it needs to spawn the `bl`/`mmx`/`node` processes and write to your Pictures folder). It is ad-hoc signed with a stable designated requirement (`identifier "dev.blstudio.app"`) so macOS Keychain keeps trusting the same app across rebuilds and updates, keeping your stored API keys readable.
 - `usage free` / `quota check` reflect the active `bl` profile's console session, not arbitrary API keys. Per-key numbers come from the local ledger.
 - MiniMax `image-01` has no seed, negative-prompt, or watermark settings, so those controls are disabled when MiniMax is selected. MiniMax images are delivered as JPEG (1024px at the default resolution) and are logged to the same per-key usage ledger.
 - App Transport Security allows arbitrary loads because some image CDNs serve results over plain HTTP.
 - MiniMax video requires the `mmx` CLI (`npm i -g mmx-cli`). MiniMax-H3 renders 2K output with 4–15 s clips and aspect-ratio control (it needs mmx 1.0.19 or newer); Hailuo-2.3 uses model defaults. Renders take a few minutes and mmx polls automatically. MiniMax image-to-video takes a local first frame (mmx base64-encodes it) or an image URL, while Bailian image-to-video needs a publicly reachable image URL.
 - Pollinations is free and keyless but is a shared public service, so it can be slow or rate-limited at times. Gemini image generation is billed per image and isn't reliably covered by the Gemini free tier, so regular use needs credits/billing enabled.
-- MiniMax music generation (`music-3.0` / `music-2.6`, or the `-free` variants) composes a full song synchronously and usually takes about a minute. Leave lyrics empty for an instrumental. The plain models need a Token Plan or paid usage; the `-free` variants are available to all API-key users at a lower rate limit. MiniMax speech uses `speech-2.8-hd` with a system voice id. Both are billed by MiniMax like other MiniMax calls.
+- MiniMax music generation (`music-3.0` / `music-2.6`, or the `-free` variants) composes a full song synchronously and usually takes about a minute. Leave lyrics empty for an instrumental. Note that MiniMax has stopped offering the Music API to new accounts (error 2153); only existing paying customers can still use it. MiniMax speech uses `speech-2.8-hd` with a system voice id and is billed like other MiniMax calls.
 - Fish Audio streams speech back directly and is credit-based; the Test button runs a tiny TTS request to confirm a key. Leave the reference id empty to use your account's default voice.
 - Cloudflare Workers AI uses your account's free neuron allowance (10,000 neurons per day). It needs both a Cloudflare account id and an API token; the Test button lists models without consuming any neurons. FLUX accepts a seed; negative prompt and watermark are not available.
-- Hugging Face routes each image request through an inference provider (default `fal-ai`, changeable per key). Whether a model is free or paid depends on that provider and model, so check your provider's pricing. The Test button calls `whoami-v2` and consumes nothing.
+- Hugging Face routes each image request through an inference provider. BlStudio automatically picks a provider documented as serving the selected model (FLUX.1-dev via fal-ai, FLUX.1-schnell via nscale, Stable Diffusion 3 medium via hf-inference) and falls back to the next candidate if a provider rejects the request. You can force a specific provider per key; note that a provider must actually serve the model or the request fails. Whether a model is free or paid depends on the provider and your HF account, and the token needs the Inference Providers permission. The Test button calls `whoami-v2` and consumes nothing.
 - Other `bl` capabilities aren't wrapped yet. The Chat tab plus a terminal cover the rest.

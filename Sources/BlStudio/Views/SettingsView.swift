@@ -107,6 +107,15 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Card(title: "Per-provider API key") {
+                    Text("Pick which stored key each provider uses. Add keys in the API Keys tab. A provider with no stored keys shows “— (none)”.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(KeyProvider.allCases, id: \.self) { p in
+                        keyPickerRow(p)
+                    }
+                }
+
                 Card(title: "Defaults") {
                     LabeledContent("Image model") {
                         SuggestingField(title: "Image model", text: binding.defaultImageModel,
@@ -214,6 +223,49 @@ struct SettingsView: View {
         case .fish: return "Speech (Fish Audio)"
         case .cloudflare: return "Free-tier images (Workers AI FLUX)"
         case .huggingface: return "Images via inference providers"
+        case .meta: return "Meta Muse Image ($0.01 per image)"
+        }
+    }
+
+    /// A single per-provider key picker row. Shows the provider label, the
+    /// currently active key (if any), and a menu to switch keys.
+    @ViewBuilder
+    private func keyPickerRow(_ p: KeyProvider) -> some View {
+        let candidates = app.keysStore.keys(for: p)
+        let preferredId = app.settingsStore.preferredKeyId(for: p)
+        let activeId = preferredId ?? candidates.first?.id
+        let activeLabel = candidates.first(where: { $0.id == activeId })?.label
+        let activeMasked = candidates.first(where: { $0.id == activeId })?.masked
+
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(p.label).font(.callout)
+                if let label = activeLabel {
+                    Text("Active: \(label) (\(activeMasked ?? ""))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No key for this provider yet")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+            Spacer()
+            Picker("", selection: Binding(
+                get: { activeId },
+                set: { newId in
+                    app.settingsStore.setPreferredKeyId(newId, for: p)
+                }
+            )) {
+                Text("— (use first available)").tag(UUID?.none)
+                ForEach(candidates) { key in
+                    Text("\(key.label) (\(key.masked))").tag(UUID?.some(key.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(maxWidth: 320)
+            .disabled(candidates.isEmpty)
         }
     }
 }

@@ -9,11 +9,16 @@ final class CloudflareClient: @unchecked Sendable {
     static let baseURL = "https://api.cloudflare.com/client/v4"
 
     /// Generates an image via POST /accounts/{account}/ai/run/{model}.
+    ///
+    /// Each Workers AI model validates its input strictly, so the body is built
+    /// per model: FLUX only accepts `prompt`/`steps`/`seed`, while SDXL
+    /// Lightning takes `width`/`height`/`num_steps`/`negative_prompt`/`seed`.
     func generate(
         apiKey: String,
         accountId: String,
         model: String,
         prompt: String,
+        negativePrompt: String? = nil,
         width: Int,
         height: Int,
         seed: Int? = nil,
@@ -29,16 +34,18 @@ final class CloudflareClient: @unchecked Sendable {
         req.timeoutInterval = 180
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // FLUX expects dimensions that are multiples of 8.
-        let w = max(64, (width / 8) * 8)
-        let h = max(64, (height / 8) * 8)
-        var body: [String: Any] = [
-            "prompt": prompt,
-            "width": w,
-            "height": h,
-            "steps": 4,
-        ]
-        if let seed { body["seed"] = seed }
+        var body: [String: Any] = ["prompt": prompt]
+        if model.contains("flux") {
+            body["steps"] = 4
+        } else {
+            // FLUX expects dimensions that are multiples of 8.
+            body["width"] = max(64, (width / 8) * 8)
+            body["height"] = max(64, (height / 8) * 8)
+            body["num_steps"] = 4
+            if let seed { body["seed"] = seed }
+            let np = negativePrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !np.isEmpty { body["negative_prompt"] = np }
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: req)
@@ -47,17 +54,41 @@ final class CloudflareClient: @unchecked Sendable {
         guard http.statusCode == 200 else {
             throw CloudflareError.http(http.statusCode, Self.errorMessage(from: text) ?? String(text.prefix(200)))
         }
-        let decoded = try JSONDecoder().decode(CloudflareImageResult.self, from: data)
-        if decoded.success == false {
-            throw CloudflareError.api(decoded.errors?.first?.message ?? "request failed")
+        // Workers AI image models return one of two shapes: a JSON envelope
+        // `{"result": {"image": "<base64>"}}` (FLUX) or the raw image bytes
+        // (SDXL Lightning). Handle both.
+        if let bytes = Self.imageBytes(from: data) {
+            try? FileManager.default.removeItem(at: dest)
+            try bytes.write(to: dest)
+            return dest
         }
-        guard let b64 = decoded.result?.image, !b64.isEmpty,
-              let bytes = Data(base64Encoded: b64) else {
+        // Not raw image bytes: try the JSON envelope.
+        if let decoded = try? JSONDecoder().decode(CloudflareImageResult.self, from: data) {
+            if decoded.success == false {
+                throw CloudflareError.api(decoded.errors?.first?.message ?? "request failed")
+            }
+            if let b64 = decoded.result?.image, !b64.isEmpty,
+               let bytes = Data(base64Encoded: b64) {
+                try? FileManager.default.removeItem(at: dest)
+                try bytes.write(to: dest)
+                return dest
+            }
             throw CloudflareError.badResponse("no image returned")
         }
-        try? FileManager.default.removeItem(at: dest)
-        try bytes.write(to: dest)
-        return dest
+        let preview = String(data: data.prefix(200), encoding: .utf8) ?? "\(data.count) binary bytes"
+        throw CloudflareError.badResponse("unrecognized response: \(preview)")
+    }
+
+    /// Returns the payload directly if it already is raw image data
+    /// (JPEG / PNG / WebP magic bytes), otherwise nil.
+    private static func imageBytes(from data: Data) -> Data? {
+        guard data.count > 8 else { return nil }
+        let b = [UInt8](data.prefix(12))
+        let isJPEG = b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF
+        let isPNG = b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47
+        let isWebP = b.count >= 12 && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
+            && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50
+        return (isJPEG || isPNG || isWebP) ? data : nil
     }
 
     /// Validates the account id + token by listing models (consumes no credits).

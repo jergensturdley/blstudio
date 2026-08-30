@@ -50,6 +50,10 @@ struct AppSettings: Codable, Sendable {
     /// Providers the user switched off in Settings (raw values). Optional so
     /// older settings files decode cleanly; nil/absent means everything is on.
     var disabledProviders: [String]? = nil
+    /// Provider → preferred API key id. Used by the per-provider resolution
+    /// in KeysStore; absent means "no preference, fall back to the first key
+    /// of that provider". Optional for backward compatibility.
+    var preferredKeyByProvider: [String: UUID]? = nil
 
     var libraryURL: URL {
         if imageLibraryDir.isEmpty { return AppPaths.defaultImageLibrary }
@@ -58,6 +62,16 @@ struct AppSettings: Codable, Sendable {
 
     func isProviderEnabled(_ p: KeyProvider) -> Bool {
         !(disabledProviders ?? []).contains(p.rawValue)
+    }
+
+    func preferredKeyId(for provider: KeyProvider) -> UUID? {
+        preferredKeyByProvider?[provider.rawValue]
+    }
+
+    mutating func setPreferredKeyId(_ id: UUID?, for provider: KeyProvider) {
+        var map = preferredKeyByProvider ?? [:]
+        if let id { map[provider.rawValue] = id } else { map.removeValue(forKey: provider.rawValue) }
+        preferredKeyByProvider = map.isEmpty ? nil : map
     }
 }
 
@@ -97,12 +111,54 @@ final class SettingsStore {
         }
         settings.disabledProviders = disabled.isEmpty ? nil : Array(disabled).sorted()
     }
+
+    /// Returns the preferred API key id for `provider`, or nil if no preference
+    /// is stored or the stored id no longer points at a key of that provider.
+    func preferredKeyId(for provider: KeyProvider) -> UUID? {
+        settings.preferredKeyId(for: provider)
+    }
+
+    func setPreferredKeyId(_ id: UUID?, for provider: KeyProvider) {
+        settings.setPreferredKeyId(id, for: provider)
+    }
 }
 
 // MARK: - Keychain
 
 enum Keychain {
     static let service = "BlStudio"
+
+    /// Carries the result out of the watchdog thread.
+    private final class SecretBox: @unchecked Sendable {
+        var value: String?
+    }
+
+    /// Reads a secret with a hard timeout. A keychain item whose ACL demands
+    /// interactive authorization would otherwise block the calling thread on a
+    /// dialog forever (corrupted items from older builds can do that); in that
+    /// case we give up after `timeout` seconds and return nil. The blocked
+    /// worker thread is left behind; it unblocks if the dialog is ever answered.
+    static func getSecret(account: String, timeout: TimeInterval = 10) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        let box = SecretBox()
+        let sem = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            var item: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &item)
+            if status == errSecSuccess, let data = item as? Data {
+                box.value = String(data: data, encoding: .utf8)
+            }
+            sem.signal()
+        }
+        guard sem.wait(timeout: .now() + timeout) == .success else { return nil }
+        return box.value
+    }
 
     static func setSecret(_ secret: String, account: String) throws {
         let data = Data(secret.utf8)
@@ -111,37 +167,35 @@ enum Keychain {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(query as CFDictionary)
+        deleteSecret(account: account)
         var attrs = query
         attrs[kSecValueData as String] = data
         attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let status = SecItemAdd(attrs as CFDictionary, nil)
+        var status = SecItemAdd(attrs as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            // A stale item survived the delete (its ACL demanded user consent
+            // and the watchdog gave up). Replace its value in place instead.
+            let update: [String: Any] = [kSecValueData as String: data]
+            status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        }
         guard status == errSecSuccess else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }
     }
 
-    static func getSecret(account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func deleteSecret(account: String) {
+    /// Deletes a secret, bounded by the same watchdog as reads.
+    static func deleteSecret(account: String, timeout: TimeInterval = 10) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(query as CFDictionary)
+        let sem = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            SecItemDelete(query as CFDictionary)
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + timeout)
     }
 }
 
@@ -162,35 +216,54 @@ struct KeySelection: Hashable, Sendable {
 @MainActor
 @Observable
 final class KeysStore {
+    /// Settings is needed to look up the per-provider preferred key id.
+    @ObservationIgnored let settings: SettingsStore
+
     private(set) var keys: [APIKeyMeta] = []
-    /// The key currently selected for requests. `nil` = use the CLI default profile.
-    var activeKeyId: UUID?
 
     private struct Persisted: Codable {
         var keys: [APIKeyMeta]
+        // Older files may carry `activeKeyId` from the previous build; we
+        // ignore it on load and drop it from the schema.
         var activeKeyId: UUID?
     }
 
-    init() {
+    init(settings: SettingsStore) {
+        self.settings = settings
         if let data = try? Data(contentsOf: AppPaths.keysFile),
            let decoded = try? JSONDecoder().decode(Persisted.self, from: data) {
             keys = decoded.keys
-            activeKeyId = decoded.activeKeyId
+            // Old `activeKeyId` is intentionally dropped. No migration is run
+            // because the provider-specific preference will be set the next
+            // time the user changes it from Settings.
         }
     }
 
-    var activeMeta: APIKeyMeta? {
-        keys.first { $0.id == activeKeyId }
+    /// Resolves the API key for `provider`: the per-provider preference from
+    /// Settings if it still points at a key of that provider, otherwise the
+    /// first key of that provider. Returns nil if none exists.
+    func activeMeta(for provider: KeyProvider) -> APIKeyMeta? {
+        if let preferred = settings.preferredKeyId(for: provider),
+           let m = keys.first(where: { $0.id == preferred && $0.resolvedProvider == provider }) {
+            return m
+        }
+        return keys.first { $0.resolvedProvider == provider }
     }
 
-    /// Secret for the active key (nil when using CLI default profile).
-    var activeSecret: String? {
-        guard let id = activeKeyId else { return nil }
-        return Keychain.getSecret(account: id.uuidString)
+    /// Convenience: secret for the resolved key, or nil if none.
+    func activeSecret(for provider: KeyProvider) -> String? {
+        guard let m = activeMeta(for: provider) else { return nil }
+        return Keychain.getSecret(account: m.id.uuidString)
     }
 
-    func activeLabel() -> String {
-        activeMeta?.label ?? "CLI default profile"
+    func activeLabel(for provider: KeyProvider) -> String {
+        activeMeta(for: provider)?.label ?? "No \(provider.label) key"
+    }
+
+    /// Keys of the given provider, in storage order (used by Settings to build
+    /// the per-provider key picker).
+    func keys(for provider: KeyProvider) -> [APIKeyMeta] {
+        keys.filter { $0.resolvedProvider == provider }
     }
 
     func add(label: String, secret: String, provider: KeyProvider = .bailian,
@@ -207,118 +280,53 @@ final class KeysStore {
         meta.accountId = acct.isEmpty ? nil : acct
         try Keychain.setSecret(trimmed, account: meta.id.uuidString)
         keys.append(meta)
-        if activeKeyId == nil { activeKeyId = meta.id }
+        // If this is the first key of its provider, make it the preferred one
+        // so the user doesn't have to touch Settings just to get started.
+        if settings.preferredKeyId(for: provider) == nil {
+            settings.setPreferredKeyId(meta.id, for: provider)
+        }
         save()
         return meta
     }
 
-    // MARK: MiniMax key resolution
+    // MARK: Per-provider convenience accessors
+
+    var bailianConfigured: Bool { keys.contains { $0.resolvedProvider == .bailian } }
+    var activeBailianMeta: APIKeyMeta? { activeMeta(for: .bailian) }
+    var activeBailianSecret: String? { activeSecret(for: .bailian) }
+    func activeBailianLabel() -> String { activeLabel(for: .bailian) }
 
     var miniMaxConfigured: Bool { keys.contains { $0.isMiniMax } }
-
-    /// The MiniMax key to use: the globally active key when it is a MiniMax key,
-    /// otherwise the first MiniMax key in the list.
-    var activeMiniMaxMeta: APIKeyMeta? {
-        if let m = activeMeta, m.isMiniMax { return m }
-        return keys.first { $0.isMiniMax }
-    }
-
-    var activeMiniMaxSecret: String? {
-        guard let m = activeMiniMaxMeta else { return nil }
-        return Keychain.getSecret(account: m.id.uuidString)
-    }
-
-    func activeMiniMaxLabel() -> String {
-        activeMiniMaxMeta?.label ?? "No MiniMax key"
-    }
-
-    // MARK: Gemini key resolution
+    var activeMiniMaxMeta: APIKeyMeta? { activeMeta(for: .minimax) }
+    var activeMiniMaxSecret: String? { activeSecret(for: .minimax) }
+    func activeMiniMaxLabel() -> String { activeLabel(for: .minimax) }
 
     var geminiConfigured: Bool { keys.contains { $0.isGemini } }
-
-    /// The Gemini key to use: the globally active key when it is a Gemini key,
-    /// otherwise the first Gemini key in the list.
-    var activeGeminiMeta: APIKeyMeta? {
-        if let m = activeMeta, m.isGemini { return m }
-        return keys.first { $0.isGemini }
-    }
-
-    var activeGeminiSecret: String? {
-        guard let m = activeGeminiMeta else { return nil }
-        return Keychain.getSecret(account: m.id.uuidString)
-    }
-
-    func activeGeminiLabel() -> String {
-        activeGeminiMeta?.label ?? "No Gemini key"
-    }
-
-    // MARK: Fish Audio key resolution
+    var activeGeminiMeta: APIKeyMeta? { activeMeta(for: .gemini) }
+    var activeGeminiSecret: String? { activeSecret(for: .gemini) }
+    func activeGeminiLabel() -> String { activeLabel(for: .gemini) }
 
     var fishConfigured: Bool { keys.contains { $0.isFish } }
-
-    /// The Fish Audio key to use: the globally active key when it is a Fish key,
-    /// otherwise the first Fish key in the list.
-    var activeFishMeta: APIKeyMeta? {
-        if let m = activeMeta, m.isFish { return m }
-        return keys.first { $0.isFish }
-    }
-
-    var activeFishSecret: String? {
-        guard let m = activeFishMeta else { return nil }
-        return Keychain.getSecret(account: m.id.uuidString)
-    }
-
-    func activeFishLabel() -> String {
-        activeFishMeta?.label ?? "No Fish Audio key"
-    }
-
-    // MARK: Cloudflare key resolution
+    var activeFishMeta: APIKeyMeta? { activeMeta(for: .fish) }
+    var activeFishSecret: String? { activeSecret(for: .fish) }
+    func activeFishLabel() -> String { activeLabel(for: .fish) }
 
     var cloudflareConfigured: Bool { keys.contains { $0.isCloudflare } }
-
-    /// The Cloudflare key to use: the globally active key when it is a Cloudflare
-    /// key, otherwise the first Cloudflare key in the list.
-    var activeCloudflareMeta: APIKeyMeta? {
-        if let m = activeMeta, m.isCloudflare { return m }
-        return keys.first { $0.isCloudflare }
-    }
-
-    var activeCloudflareSecret: String? {
-        guard let m = activeCloudflareMeta else { return nil }
-        return Keychain.getSecret(account: m.id.uuidString)
-    }
-
-    var activeCloudflareAccountId: String? {
-        activeCloudflareMeta?.accountId
-    }
-
-    func activeCloudflareLabel() -> String {
-        activeCloudflareMeta?.label ?? "No Cloudflare key"
-    }
-
-    // MARK: Hugging Face key resolution
+    var activeCloudflareMeta: APIKeyMeta? { activeMeta(for: .cloudflare) }
+    var activeCloudflareSecret: String? { activeSecret(for: .cloudflare) }
+    var activeCloudflareAccountId: String? { activeCloudflareMeta?.accountId }
+    func activeCloudflareLabel() -> String { activeLabel(for: .cloudflare) }
 
     var huggingFaceConfigured: Bool { keys.contains { $0.isHuggingFace } }
+    var activeHuggingFaceMeta: APIKeyMeta? { activeMeta(for: .huggingface) }
+    var activeHuggingFaceSecret: String? { activeSecret(for: .huggingface) }
+    var activeHuggingFaceProvider: String? { activeHuggingFaceMeta?.accountId }
+    func activeHuggingFaceLabel() -> String { activeLabel(for: .huggingface) }
 
-    /// The Hugging Face key to use: the globally active key when it is a Hugging
-    /// Face key, otherwise the first Hugging Face key in the list.
-    var activeHuggingFaceMeta: APIKeyMeta? {
-        if let m = activeMeta, m.isHuggingFace { return m }
-        return keys.first { $0.isHuggingFace }
-    }
-
-    var activeHuggingFaceSecret: String? {
-        guard let m = activeHuggingFaceMeta else { return nil }
-        return Keychain.getSecret(account: m.id.uuidString)
-    }
-
-    var activeHuggingFaceProvider: String? {
-        activeHuggingFaceMeta?.accountId
-    }
-
-    func activeHuggingFaceLabel() -> String {
-        activeHuggingFaceMeta?.label ?? "No Hugging Face key"
-    }
+    var metaMuseConfigured: Bool { keys.contains { $0.isMeta } }
+    var activeMetaMuseMeta: APIKeyMeta? { activeMeta(for: .meta) }
+    var activeMetaMuseSecret: String? { activeSecret(for: .meta) }
+    func activeMetaMuseLabel() -> String { activeLabel(for: .meta) }
 
     func updateLabel(_ id: UUID, label: String) {
         guard let i = keys.firstIndex(where: { $0.id == id }) else { return }
@@ -327,18 +335,24 @@ final class KeysStore {
     }
 
     func remove(_ id: UUID) {
+        guard let removed = keys.first(where: { $0.id == id }) else { return }
+        let provider = removed.resolvedProvider
         Keychain.deleteSecret(account: id.uuidString)
         keys.removeAll { $0.id == id }
-        if activeKeyId == id { activeKeyId = keys.first?.id }
+        // Clear the per-provider preference if it pointed at the removed key,
+        // so the next resolution falls back to the next key of that provider.
+        if settings.preferredKeyId(for: provider) == id {
+            settings.setPreferredKeyId(nil, for: provider)
+        }
         save()
     }
 
-    func secret(for id: UUID) -> String? {
-        Keychain.getSecret(account: id.uuidString)
+    func secret(for id: UUID, timeout: TimeInterval = 10) -> String? {
+        Keychain.getSecret(account: id.uuidString, timeout: timeout)
     }
 
     private func save() {
-        let persisted = Persisted(keys: keys, activeKeyId: activeKeyId)
+        let persisted = Persisted(keys: keys, activeKeyId: nil)
         if let data = try? JSONEncoder().encode(persisted) {
             try? data.write(to: AppPaths.keysFile, options: .atomic)
         }

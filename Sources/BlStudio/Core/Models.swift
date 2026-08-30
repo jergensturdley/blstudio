@@ -232,6 +232,7 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
     case fish = "fish"
     case cloudflare = "cloudflare"
     case huggingface = "huggingface"
+    case meta = "meta"
 
     var label: String {
         switch self {
@@ -242,6 +243,7 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
         case .fish: return "Fish Audio"
         case .cloudflare: return "Cloudflare Workers AI"
         case .huggingface: return "Hugging Face"
+        case .meta: return "Meta Muse Image"
         }
     }
 
@@ -251,7 +253,7 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
     /// Which providers back each feature tab (used to build pickers and to
     /// respect the Settings on/off switches).
     static let imageProviders: [KeyProvider] = [
-        .bailian, .minimax, .pollinations, .gemini, .cloudflare, .huggingface,
+        .bailian, .minimax, .pollinations, .gemini, .cloudflare, .huggingface, .meta,
     ]
     static let videoProviders: [KeyProvider] = [.bailian, .minimax]
     static let speechProviders: [KeyProvider] = [.minimax, .fish]
@@ -275,4 +277,5 @@ struct APIKeyMeta: Codable, Identifiable, Sendable {
     var isFish: Bool { resolvedProvider == .fish }
     var isCloudflare: Bool { resolvedProvider == .cloudflare }
     var isHuggingFace: Bool { resolvedProvider == .huggingface }
+    var isMeta: Bool { resolvedProvider == .meta }
 }

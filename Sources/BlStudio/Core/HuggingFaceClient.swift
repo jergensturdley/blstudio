@@ -10,6 +10,26 @@ final class HuggingFaceClient: @unchecked Sendable {
     static let baseURL = "https://router.huggingface.co"
     static let defaultProvider = "fal-ai"
 
+    /// Router providers known to serve each model, per the HF docs
+    /// providersMapping for the text-to-image task plus live smoke-test
+    /// results. Used to route requests automatically when a key has no
+    /// explicit provider override.
+    static let providersByModel: [String: [String]] = [
+        "black-forest-labs/FLUX.2-klein-4B": ["fal-ai", "replicate", "wavespeed"],
+        "black-forest-labs/FLUX.2-klein-9B": ["fal-ai", "replicate", "wavespeed"],
+        "black-forest-labs/FLUX.1-dev": ["fal-ai", "replicate", "wavespeed"],
+    ]
+
+    /// Builds the provider attempt order for a model: the explicit override
+    /// first, then the documented providers, then the default.
+    static func providerOrder(model: String, explicit: String?) -> [String] {
+        var order: [String] = []
+        if let e = cleaned(explicit), !order.contains(e) { order.append(e) }
+        for p in providersByModel[model] ?? [] where !order.contains(p) { order.append(p) }
+        if order.isEmpty { order.append(defaultProvider) }
+        return order
+    }
+
     /// Generates an image via the Inference Providers router.
     func generate(
         apiKey: String,
@@ -18,7 +38,8 @@ final class HuggingFaceClient: @unchecked Sendable {
         prompt: String,
         width: Int,
         height: Int,
-        dest: URL
+        dest: URL,
+        timeout: TimeInterval = 180
     ) async throws -> URL {
         let prov = Self.cleaned(provider) ?? Self.defaultProvider
         guard let url = URL(string: "\(Self.baseURL)/\(prov)/v1/images/generations") else {
@@ -26,7 +47,7 @@ final class HuggingFaceClient: @unchecked Sendable {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.timeoutInterval = 180
+        req.timeoutInterval = timeout
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String: Any] = [
@@ -57,6 +78,26 @@ final class HuggingFaceClient: @unchecked Sendable {
             return try await downloadImage(urlString, to: dest)
         }
         throw HuggingFaceError.badResponse("no image data in response")
+    }
+
+    /// Lists model ids served by a provider's OpenAI-compatible endpoint.
+    /// Some providers return 404 for `/v1/models`; that surfaces as an error.
+    func listModels(apiKey: String, provider: String) async throws -> [String] {
+        guard let url = URL(string: "\(Self.baseURL)/\(Self.cleaned(provider) ?? Self.defaultProvider)/v1/models") else {
+            throw HuggingFaceError.badURL
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 20
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw HuggingFaceError.badResponse("no HTTP response") }
+        let text = String(data: data, encoding: .utf8) ?? ""
+        guard http.statusCode == 200 else {
+            throw HuggingFaceError.http(http.statusCode, Self.errorMessage(from: text) ?? String(text.prefix(160)))
+        }
+        struct Models: Codable { struct Item: Codable { var id: String? }; var data: [Item]? }
+        let decoded = try JSONDecoder().decode(Models.self, from: data)
+        return (decoded.data ?? []).compactMap { $0.id }
     }
 
     /// Validates a token via whoami-v2 (consumes no credits).

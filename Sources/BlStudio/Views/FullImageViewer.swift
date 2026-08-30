@@ -236,7 +236,7 @@ struct FullImageViewer: View {
         defer { describing = false }
         do {
             let result = try await app.client.visionDescribe(
-                imagePath: path, prompt: nil, model: nil, apiKey: app.activeSecret)
+                imagePath: path, prompt: nil, model: nil, apiKey: app.bailianSecret)
             description = result
             app.recordUsage(kind: .vision, model: nil, durationMs: 0, ok: true)
         } catch {

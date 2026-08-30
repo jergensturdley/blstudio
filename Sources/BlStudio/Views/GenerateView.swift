@@ -157,7 +157,7 @@ struct GenerateView: View {
                         }
                         if gen.isCloudflare {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Cloudflare Workers AI has a free tier of 10,000 neurons per day. Seed is supported; negative prompt and watermark are not.")
+                                Text("Cloudflare Workers AI has a free tier of 10,000 neurons per day. Seed is supported. FLUX renders at a fixed size and ignores the size and negative-prompt settings; SDXL Lightning honors both.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                                 if !app.cloudflareConfigured {
@@ -169,7 +169,7 @@ struct GenerateView: View {
                         }
                         if gen.isHuggingFace {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Hugging Face routes through an inference provider; free availability depends on the provider and model. Seed, negative prompt, and watermark are not available.")
+                                Text("Hugging Face routes through an inference provider; BlStudio picks a provider known to serve the selected model and falls back if one rejects it. Availability and pricing depend on the provider and your account. Seed, negative prompt, and watermark are not available.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                                 if !app.huggingFaceConfigured {
@@ -179,11 +179,49 @@ struct GenerateView: View {
                                 }
                             }
                         }
+                        if gen.isMeta {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Meta Muse Image is Meta Superintelligence Labs' agentic image model ($0.01 per image). The size picker sends an aspect-ratio hint; Muse renders at its own native resolution. Seed is not supported on the public images endpoint.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if !app.metaMuseConfigured {
+                                    Text("No Meta key yet. Create one in the Meta Model API dashboard and add it in the API Keys tab with provider Meta Muse Image.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                        }
 
                         LabeledContent("Model") {
-                            SuggestingField(title: "Model", text: $gen.model,
-                                            suggestions: modelSuggestions)
-                                .frame(maxWidth: 300)
+                            HStack(spacing: 6) {
+                                SuggestingField(title: "Model", text: $gen.model,
+                                                suggestions: modelSuggestions)
+                                    .frame(maxWidth: 300)
+                                if gen.canRefreshModels {
+                                    Button {
+                                        Task { await gen.refreshModels() }
+                                    } label: {
+                                        if gen.isRefreshingModels {
+                                            ProgressView().controlSize(.small)
+                                        } else {
+                                            Image(systemName: "arrow.clockwise.circle")
+                                                .imageScale(.large)
+                                        }
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help("Refresh the model list for \(gen.provider.capitalized) from the live catalog.")
+                                    .disabled(gen.isRefreshingModels)
+                                }
+                            }
+                            if let err = gen.refreshedModelsError {
+                                Text("Couldn't refresh: \(err)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            } else if !gen.refreshedModelsSource.isEmpty {
+                                Text("Showing \(gen.refreshedModels?.count ?? 0) models from \(gen.refreshedModelsSource).")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         LabeledContent("Size") {
                             if gen.isMiniMax {
@@ -193,7 +231,7 @@ struct GenerateView: View {
                                 .pickerStyle(.menu)
                                 .labelsHidden()
                                 .frame(maxWidth: 300)
-                            } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace {
+                            } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace || gen.isMeta {
                                 Picker("", selection: $gen.size) {
                                     ForEach(ModelCatalog.freeAspectRatios, id: \.self) { Text($0).tag($0) }
                                 }
@@ -248,7 +286,7 @@ struct GenerateView: View {
                                 .help("Fill with a random seed")
                             }
                         }
-                        .disabled(gen.isMiniMax || gen.isGemini || gen.isHuggingFace)
+                        .disabled(gen.isMiniMax || gen.isGemini || gen.isHuggingFace || gen.isMeta)
                         LabeledContent("Negative prompt") {
                             TextField("things to avoid", text: $gen.negativePrompt)
                                 .textFieldStyle(.roundedBorder)
@@ -325,10 +363,15 @@ struct GenerateView: View {
                 ensureValidProvider()
             }
             .onChange(of: gen.provider) { _, _ in
+                // Drop any cached refreshed-list so it can't leak across
+                // providers (e.g. HF-specific model ids showing up in Bailian).
+                gen.refreshedModels = nil
+                gen.refreshedModelsSource = ""
+                gen.refreshedModelsError = nil
                 if gen.isMiniMax {
                     if !ModelCatalog.minimaxAspectRatios.contains(gen.size) { gen.size = "1:1" }
                     if gen.count > 9 { gen.count = 9 }
-                } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace {
+                } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace || gen.isMeta {
                     if !ModelCatalog.freeAspectRatios.contains(gen.size) { gen.size = "1:1" }
                     if gen.count > 4 { gen.count = 4 }
                 } else {
@@ -397,17 +440,24 @@ struct GenerateView: View {
         KeyProvider.imageProviders.filter { app.isProviderEnabled($0) }
     }
     private var modelSuggestions: [String] {
+        // A successful "Refresh models" fetch overrides the static catalog for
+        // the current provider. Cleared automatically on provider switch.
+        if let refreshed = app.generate.refreshedModels, !refreshed.isEmpty {
+            return refreshed
+        }
         if app.generate.isMiniMax { return ModelCatalog.minimaxImageModels }
         if app.generate.isPollinations { return ModelCatalog.pollinationsModels }
         if app.generate.isGemini { return ModelCatalog.geminiImageModels }
         if app.generate.isCloudflare { return ModelCatalog.cloudflareImageModels }
         if app.generate.isHuggingFace { return ModelCatalog.huggingFaceImageModels }
+        if app.generate.isMeta { return ModelCatalog.metaMuseImageModels }
         return ModelCatalog.imageModels
     }
     private var countRange: ClosedRange<Int> {
         if app.generate.isMiniMax { return 1...9 }
         if app.generate.isPollinations || app.generate.isGemini
             || app.generate.isCloudflare || app.generate.isHuggingFace { return 1...4 }
+        if app.generate.isMeta { return 1...4 }
         return 1...6
     }
     private var countCaption: String {
@@ -415,6 +465,9 @@ struct GenerateView: View {
         if app.generate.isPollinations || app.generate.isGemini
             || app.generate.isCloudflare || app.generate.isHuggingFace {
             return "Runs \(app.generate.count) requests in sequence."
+        }
+        if app.generate.isMeta {
+            return "Runs \(app.generate.count) requests in sequence ($0.01 per image)."
         }
         return "Runs \(app.generate.count) parallel single-image requests (works with every model)."
     }

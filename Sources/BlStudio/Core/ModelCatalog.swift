@@ -94,15 +94,27 @@ enum ModelCatalog {
 
     /// Cloudflare Workers AI image models (free tier: 10,000 neurons/day).
     static let cloudflareImageModels = [
-        "@cf/black-forest-labs/FLUX.1-schnell",
+        "@cf/black-forest-labs/flux-1-schnell",
         "@cf/bytedance/stable-diffusion-xl-lightning",
     ]
 
-    /// Hugging Face Inference Providers image models.
+    /// Hugging Face Inference Providers image models. BlStudio routes each
+    /// model to a router provider documented as serving it (see
+    /// HuggingFaceClient.providersByModel); availability and pricing depend on
+    /// the provider and your HF account. The FLUX.2 Klein models are the
+    /// reliably-available ones on the default (fal-ai) provider.
     static let huggingFaceImageModels = [
-        "black-forest-labs/FLUX.1-schnell",
+        "black-forest-labs/FLUX.2-klein-4B",
+        "black-forest-labs/FLUX.2-klein-9B",
         "black-forest-labs/FLUX.1-dev",
-        "stabilityai/stable-diffusion-3.5-large",
+    ]
+
+    /// Meta Muse Image models served by Meta Model API ($0.01 per image).
+    /// `muse-image-1.0` is the only image model advertised on the API as of
+    /// writing; the entry is left here so users can paste newer ids when they
+    /// ship.
+    static let metaMuseImageModels = [
+        MetaMuseClient.imageModel,
     ]
 
     /// Aspect ratios shared by the free providers.

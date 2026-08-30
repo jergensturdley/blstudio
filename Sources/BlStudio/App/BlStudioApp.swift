@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Security
 
 @main
 struct BlStudioApp: App {
@@ -29,7 +30,6 @@ struct BlStudioApp: App {
         }
     }
 }
-
 /// Small mutable box to carry the self-test exit code across a concurrency domain.
 final class ExitCodeBox: @unchecked Sendable {
     var code: Int32 = 1
@@ -46,6 +46,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Headless view smoke test: render every feature view offscreen and exit.
         if ProcessInfo.processInfo.arguments.contains("--viewprobe") {
             exit(SelfTest.runViewProbe())
+        }
+
+        // Headless endpoint smoke test against the stored keys:
+        // `BlStudio --smoketest` (free checks) or `BlStudio --smoketest full`.
+        // Extra words limit the run to matching providers, e.g.
+        // `BlStudio --smoketest full huggingface`.
+        let smArgs = ProcessInfo.processInfo.arguments
+        if smArgs.contains("--smoketest") {
+            let full = smArgs.contains("full")
+            let skip: Set<String> = ["--smoketest", "full"]
+            let only = smArgs.dropFirst().filter { !skip.contains($0) && !$0.hasPrefix("-") }
+            Task { @MainActor in
+                exit(await SmokeTest.run(full: full, only: Array(only)))
+            }
+            return
+        }
+
+        // Headless keychain diagnostic (maintenance):
+        // `BlStudio --keydiag <keychain-account-uuid> [dpk]` prints the raw
+        // OSStatus; `dpk` probes the modern data-protection keychain instead.
+        if let idx = smArgs.firstIndex(of: "--keydiag"), smArgs.count > idx + 1 {
+            let account = smArgs[idx + 1]
+            let dpk = smArgs.count > idx + 2 && smArgs[idx + 2] == "dpk"
+            Task { @MainActor in
+                var query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: "BlStudio",
+                    kSecAttrAccount as String: account,
+                    kSecReturnData as String: true,
+                    kSecMatchLimit as String: kSecMatchLimitOne,
+                ]
+                if dpk { query[kSecUseDataProtectionKeychain as String] = true }
+                let started = Date()
+                var item: CFTypeRef?
+                let status = SecItemCopyMatching(query as CFDictionary, &item)
+                let ms = Int(Date().timeIntervalSince(started) * 1000)
+                let len = (item as? Data)?.count ?? 0
+                print("status=\(status) elapsed=\(ms)ms secretLen=\(len)")
+                exit(status == errSecSuccess ? 0 : 1)
+            }
+            return
+        }
+
+        // Headless DPK experiment (maintenance):
+        // `BlStudio --keydpk-set <account> <secret>` stores in the
+        // data-protection keychain; read back with `--keydiag <account> dpk`.
+        if let idx = smArgs.firstIndex(of: "--keydpk-set"), smArgs.count > idx + 2 {
+            let account = smArgs[idx + 1]
+            let secret = smArgs[idx + 2]
+            Task { @MainActor in
+                let query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: "BlStudio",
+                    kSecAttrAccount as String: account,
+                ]
+                var attrs = query
+                attrs[kSecValueData as String] = Data(secret.utf8)
+                attrs[kSecUseDataProtectionKeychain as String] = true
+                attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+                SecItemDelete(attrs as CFDictionary)
+                let status = SecItemAdd(attrs as CFDictionary, nil)
+                print("add status=\(status)")
+                exit(status == errSecSuccess ? 0 : 1)
+            }
+            return
+        }
+
+        // Headless key import (maintenance):
+        // `BlStudio --set-key <provider> <secret> [label] [accountId]`
+        if let idx = smArgs.firstIndex(of: "--set-key"), smArgs.count > idx + 2 {
+            let providerRaw = smArgs[idx + 1]
+            let secret = smArgs[idx + 2]
+            let label = smArgs.count > idx + 3 ? smArgs[idx + 3] : "main"
+            let accountId: String? = smArgs.count > idx + 4 ? smArgs[idx + 4] : nil
+            Task { @MainActor in
+                let app = AppState()
+                guard let provider = KeyProvider(rawValue: providerRaw) else {
+                    print("unknown provider: \(providerRaw)")
+                    exit(2)
+                }
+                do {
+                    let meta = try app.keysStore.add(label: label, secret: secret,
+                                                     provider: provider, accountId: accountId)
+                    print("stored \(providerRaw) key [\(meta.label)] id=\(meta.id.uuidString)")
+                    exit(0)
+                } catch {
+                    print("failed: \(error.localizedDescription)")
+                    exit(1)
+                }
+            }
+            return
         }
 
         NSApp.activate(ignoringOtherApps: true)
@@ -112,7 +203,7 @@ struct RootView: View {
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                KeyPicker()
+                Text("BlStudio").font(.headline)
             }
         }
     }
@@ -149,27 +240,5 @@ struct RootView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(.bar)
-    }
-}
-
-/// Global API-key selector shown in the toolbar.
-struct KeyPicker: View {
-    @Environment(AppState.self) private var app
-
-    var body: some View {
-        @Bindable var keys = app.keysStore
-        HStack(spacing: 6) {
-            Image(systemName: "key.horizontal")
-                .foregroundStyle(.secondary)
-            Picker("API key", selection: $keys.activeKeyId) {
-                Text("CLI default profile").tag(UUID?.none)
-                ForEach(keys.keys) { key in
-                    Text("\(key.label) (\(key.masked))").tag(UUID?.some(key.id))
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .frame(maxWidth: 300)
-        }
     }
 }
