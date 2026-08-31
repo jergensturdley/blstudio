@@ -3,14 +3,14 @@
 [![CI](https://github.com/jergensturdley/blstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/jergensturdley/blstudio/actions/workflows/ci.yml)
 [![Release](https://github.com/jergensturdley/blstudio/actions/workflows/release.yml/badge.svg)](https://github.com/jergensturdley/blstudio/releases)
 
-BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)). It drives Alibaba Cloud Bailian / DashScope from the command line. BlStudio wraps that CLI in a friendly GUI focused on:
+BlStudio is a native macOS app for image, video, music, speech, and chat generation. It uses the **`bl` CLI** ([bailian-cli](https://www.npmjs.com/package/bailian-cli)) for Alibaba Cloud Bailian / DashScope and calls its other providers directly.
 
 - **Image generation**. Prompt editor with style presets, model/size/count/seed/negative-prompt controls, live progress, and a results gallery. Multiple images (1–6) run as parallel single-image requests, so counts work even on models like `qwen-image-3.0` whose API ignores the batch parameter; a fixed seed is offset per image (seed, seed+1, …) so batches stay distinct and reproducible. A dice button fills in a random seed, and the watermark is off by default.
-- **Multiple providers**. Images through Alibaba Bailian (via the `bl` CLI), MiniMax, Pollinations (free, no API key), Google Gemini (AI Studio key), Cloudflare Workers AI (free tier), or Hugging Face (Inference Providers); video through Bailian and MiniMax (Hailuo 2.3 and MiniMax-H3, via the `mmx` CLI); music and speech through MiniMax, plus speech through Fish Audio. Switch provider per job, and turn providers on or off in Settings. MiniMax returns up to 9 images in a single request with fixed aspect ratios.
-- **Free options**. Pollinations needs no API key at all. Cloudflare Workers AI runs FLUX.1-schnell on a free tier of 10,000 neurons per day (it needs a Cloudflare account id and an API token). Google Gemini's `gemini-2.5-flash-image` ("Nano Banana") is available via an AI Studio key, but it is billed per image and isn't reliably covered by the free tier. Hugging Face routes images through an inference provider, so free availability depends on the provider and model.
+- **Multiple providers**. Images through Alibaba Bailian (via the `bl` CLI), MiniMax, Pollinations, Google Gemini, Cloudflare Workers AI, Hugging Face Inference Providers, or Meta Muse Image; video through Bailian and MiniMax; music through MiniMax; and speech through MiniMax or Fish Audio. Switch providers per job or hide unused providers in Settings. MiniMax returns up to 9 images per request with fixed aspect ratios.
+- **Keyless and account-backed options**. Pollinations needs no API key. Cloudflare needs an account ID and API token; Gemini, Hugging Face, and Meta Muse each need their provider's API key. Pricing and free allowances depend on the provider and model.
 - **Image editing**. Drop source images, describe the edit, get results back.
-- **Video generation**. Text-to-video and image-to-video through Bailian (`bl video generate`) or MiniMax Hailuo, with resolution, aspect ratio, duration, and seed controls, live progress, an inline player, and results saved to your library folder.
-- **Music generation**. Compose full songs (with optional lyrics) using MiniMax `music-2.0` / `music-1.5`, then play them inline.
+- **Video generation**. Text-to-video and image-to-video through Bailian (`bl video generate`) or MiniMax Hailuo and MiniMax-H3, with provider-specific resolution, aspect-ratio, duration, and seed controls, live progress, an inline player, and results saved to your library folder.
+- **Music generation**. Compose full songs (with optional lyrics) using MiniMax `music-3.0` / `music-2.6` or their `-free` variants, then play them inline.
 - **Speech / text-to-audio**. Turn text into speech through MiniMax (`speech-2.8-hd` with voice, speed, and emotion controls) or Fish Audio (streams the audio back directly, with an optional reference voice). Generated audio plays inline with a scrubber.
 - **Easy prompting**. Saved favorite prompts and saved negative prompts, one-click style suffixes, an Enhance-with-AI button that rewrites your prompt with a Qwen text model, and quick chat for iterating further.
 - **Image receiving**. Generated images are downloaded to your library folder, shown inline, and can be opened, copied, revealed in Finder, or sent straight into the Edit tab.
@@ -21,7 +21,7 @@ BlStudio is a native macOS app for working with the **`bl` CLI** ([bailian-cli](
 
 - macOS 14+
 - Swift 6 toolchain (Xcode 16+ or Command Line Tools)
-- `bl` installed and authenticated (`bl auth login`), e.g. `npm i -g bailian-cli`. Required for the Bailian provider and for Chat/Edit/Quota; MiniMax images work without it.
+- `bl` installed and authenticated (`bl auth login`), e.g. `npm i -g bailian-cli`. Required for Bailian generation, Chat, Edit, and Bailian account-quota lookups; direct HTTP providers work without it.
 - `mmx` (mmx-cli) for MiniMax video (incl. MiniMax-H3) and MiniMax quota lookups: `npm i -g mmx-cli` (or `npm update -g mmx-cli`). MiniMax-H3 needs mmx 1.0.19 or newer.
 
 ## Build & run
@@ -33,8 +33,8 @@ make selftest     # headless smoke tests incl. live bl dry-run checks
 make test         # XCTest suite (needs full Xcode; falls back to selftest)
 ```
 
-There is also a live endpoint smoke test that runs inside the app binary (so
-it can read your Keychain keys without extra prompts):
+There is also a live endpoint smoke test that runs inside the app binary so it
+uses the app's Keychain identity. macOS may still ask you to allow key access:
 
 ```sh
 dist/BlStudio.app/Contents/MacOS/BlStudio --smoketest        # free checks only
@@ -74,7 +74,7 @@ The version embedded in `Info.plist` is derived from the tag (`v1.2.0` → `1.2.
 
 | Tab | What it does |
 | --- | --- |
-| **Generate** | Text-to-image via Bailian CLI, MiniMax, Pollinations (free, no key), Google Gemini (AI Studio key, uses credits), Cloudflare Workers AI (free tier), or Hugging Face. Pick a provider, then a model, aspect ratio or pixel size, and image count. Bailian supports 1–6 images with seed/negative/prompt-extend/watermark controls (watermark off by default). MiniMax returns 1–9 per request with fixed aspect ratios. Pollinations, Gemini, Cloudflare, and Hugging Face fan out up to 4. Style chips append suffixes; a dice button sets a random seed; Enhance with AI rewrites your prompt. |
+| **Generate** | Text-to-image via Bailian CLI, MiniMax, Pollinations (keyless), Google Gemini, Cloudflare Workers AI, Hugging Face, or Meta Muse Image. Pick a provider, model, size, and image count. Bailian supports 1–6 images with seed, negative-prompt, prompt-extension, and watermark controls. MiniMax returns 1–9 images per request with fixed aspect ratios. The other providers run up to 4 requests. Style chips append suffixes; a dice button sets a random seed; Enhance with AI rewrites your prompt. |
 | **Edit** | Image-to-image via `bl image edit`. Drag & drop or pick source images (local files or URLs), describe the change, optionally choose an edit function for `wanx*-imageedit` models. |
 | **Video** | Text-to-video and image-to-video. Bailian runs `bl video generate` (happyhorse / wan2.6 models) with resolution, aspect ratio, duration, seed, and watermark controls. MiniMax runs through the `mmx` CLI: MiniMax-H3 (Video Generation V2, 2K output, 4–15 s clips, aspect-ratio control) or Hailuo-2.3; image-to-video takes a local first frame or an image URL. Results play inline and are saved to your library folder. |
 | **Music** | Generate full songs with MiniMax `music-3.0` / `music-2.6` (or their `-free` variants). Describe the style, add optional lyrics with [verse]/[chorus] section tags, then play the result inline. Requires a MiniMax key. |
@@ -85,7 +85,7 @@ The version embedded in `Info.plist` is derived from the tag (`v1.2.0` → `1.2.
 | **API Keys** | Store multiple API keys in the macOS Keychain, each tagged as Bailian, MiniMax, Google Gemini, Fish Audio, Cloudflare Workers AI, Hugging Face, or Meta Muse Image, and test them. Cloudflare keys also take an Account ID; Hugging Face keys take an inference provider name. The first key added for each provider is used by default; pick a different one in Settings → Per-provider API key. |
 | **Settings** | bl and mmx binary path overrides, image library folder, default size/models, timeouts, on/off switches for each provider, and the per-provider API key picker. Turning a provider off hides it from the Generate, Video, and Speech pickers. |
 
-The provider selected in the Generate tab is what picks the key: it always uses the key marked preferred for that provider in Settings (falling back to the first stored key of that provider when no preference is set). The chosen key is passed to `bl` as `--api-key` for Bailian image/chat/vision calls.
+Each service uses the preferred key for its provider, falling back to the first stored key for that provider. Bailian image, chat, and vision calls pass the selected Bailian key to `bl` as `--api-key`.
 
 ### Quota tracking, precisely
 
@@ -115,6 +115,7 @@ The remaining providers are called directly over HTTP:
 - Google Gemini `generateContent` (AI Studio key, base64 inline part; image generation consumes credits).
 - Cloudflare Workers AI `accounts/{account}/ai/run/{model}` (FLUX image returned as base64; validated via the models endpoint).
 - Hugging Face Inference Providers `router.huggingface.co/{provider}/v1/images/generations` (OpenAI-compatible; result is a URL or base64; the key is validated via `whoami-v2`).
+- Meta Muse Image `api.meta.ai/v1/images/generations` (OpenAI-compatible base64 image response).
 - Fish Audio `v1/tts` (speech returned as a binary stream).
 
 ## Project layout
@@ -124,7 +125,7 @@ Sources/BlStudio/
   Core/      BLClient (process runner + JSON), command wrappers, models,
              stores (settings, keychain keys, usage ledger, history, prompts)
   App/       entry point, AppState container
-  Views/     Generate, Edit, Chat, Gallery, Quota, Keys, Settings
+  Views/     SwiftUI screens and shared view components
 Tests/       XCTest parser/integration tests
 Tools/       icon generator, Info.plist template
 ```
@@ -132,14 +133,14 @@ Tools/       icon generator, Info.plist template
 ## Notes & limitations
 
 - Secrets live in the Keychain (`BlStudio` service); only masked prefixes are shown in the UI.
-- The app is unsigned (ad-hoc) and local-only by design; no App Sandbox (it needs to spawn the `bl`/`mmx`/`node` processes and write to your Pictures folder). It is ad-hoc signed with a stable designated requirement (`identifier "dev.blstudio.app"`) so macOS Keychain keeps trusting the same app across rebuilds and updates, keeping your stored API keys readable.
+- The app is ad-hoc signed rather than Developer ID signed, and it does not use App Sandbox because it spawns `bl`, `mmx`, and `node` and writes to your library folder. Its stable designated requirement (`identifier "dev.blstudio.app"`) lets Keychain recognize rebuilt and updated copies as the same app.
 - `usage free` / `quota check` reflect the active `bl` profile's console session, not arbitrary API keys. Per-key numbers come from the local ledger.
 - MiniMax `image-01` has no seed, negative-prompt, or watermark settings, so those controls are disabled when MiniMax is selected. MiniMax images are delivered as JPEG (1024px at the default resolution) and are logged to the same per-key usage ledger.
 - App Transport Security allows arbitrary loads because some image CDNs serve results over plain HTTP.
 - MiniMax video requires the `mmx` CLI (`npm i -g mmx-cli`). MiniMax-H3 renders 2K output with 4–15 s clips and aspect-ratio control (it needs mmx 1.0.19 or newer); Hailuo-2.3 uses model defaults. Renders take a few minutes and mmx polls automatically. MiniMax image-to-video takes a local first frame (mmx base64-encodes it) or an image URL, while Bailian image-to-video needs a publicly reachable image URL.
-- Pollinations is free and keyless but is a shared public service, so it can be slow or rate-limited at times. Gemini image generation is billed per image and isn't reliably covered by the Gemini free tier, so regular use needs credits/billing enabled.
-- MiniMax music generation (`music-3.0` / `music-2.6`, or the `-free` variants) composes a full song synchronously and usually takes about a minute. Leave lyrics empty for an instrumental. Note that MiniMax has stopped offering the Music API to new accounts (error 2153); only existing paying customers can still use it. MiniMax speech uses `speech-2.8-hd` with a system voice id and is billed like other MiniMax calls.
+- Pollinations is keyless but may be slow or rate-limited. Gemini image availability and billing depend on the account and model.
+- MiniMax music generation (`music-3.0` / `music-2.6`, or the `-free` variants) is synchronous and may take about a minute. Leave lyrics empty for an instrumental. MiniMax can reject Music API access with error 2153. MiniMax speech uses `speech-2.8-hd` with a system voice ID.
 - Fish Audio streams speech back directly and is credit-based; the Test button runs a tiny TTS request to confirm a key. Leave the reference id empty to use your account's default voice.
-- Cloudflare Workers AI uses your account's free neuron allowance (10,000 neurons per day). It needs both a Cloudflare account id and an API token; the Test button lists models without consuming any neurons. FLUX accepts a seed; negative prompt and watermark are not available.
-- Hugging Face routes each image request through an inference provider. BlStudio automatically picks a provider documented as serving the selected model (FLUX.1-dev via fal-ai, FLUX.1-schnell via nscale, Stable Diffusion 3 medium via hf-inference) and falls back to the next candidate if a provider rejects the request. You can force a specific provider per key; note that a provider must actually serve the model or the request fails. Whether a model is free or paid depends on the provider and your HF account, and the token needs the Inference Providers permission. The Test button calls `whoami-v2` and consumes nothing.
+- Cloudflare Workers AI needs an account ID and API token. The Test button lists models. FLUX accepts a seed; SDXL Lightning also accepts a negative prompt. Watermark control is unavailable.
+- Hugging Face routes each image request through an inference provider. BlStudio tries a model-specific provider order and falls back when a provider rejects the request. You can force one provider per key. The token needs Inference Providers permission; availability and billing depend on the provider, model, and account. The Test button calls `whoami-v2`.
 - Other `bl` capabilities aren't wrapped yet. The Chat tab plus a terminal cover the rest.
