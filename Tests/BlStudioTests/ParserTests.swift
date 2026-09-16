@@ -196,6 +196,7 @@ final class LedgerTests: XCTestCase {
 /// infers it from key prefixes and the usage ledger.
 final class LegacyKeyMigrationTests: XCTestCase {
 
+    @MainActor
     private func makeLedger(events: [(key: UUID, model: String?)]) -> UsageLedger {
         let ledger = UsageLedger(fileURL: AppPaths.makeTempUsageFile())
         for e in events {
