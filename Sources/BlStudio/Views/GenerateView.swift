@@ -191,6 +191,42 @@ struct GenerateView: View {
                                 }
                             }
                         }
+                        if gen.isDeepInfra {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("DeepInfra serves FLUX models through an OpenAI-compatible images endpoint (pay per image, very cheap for FLUX-schnell). Seed is supported.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if !app.deepInfraConfigured {
+                                    Text("No DeepInfra key yet. Create one at deepinfra.com and add it in the API Keys tab with provider DeepInfra.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                        }
+                        if gen.isSiliconFlow {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("SiliconFlow (硅基流动) serves Qwen-Image, FLUX, and Kolors through an OpenAI-compatible images endpoint. Seed is supported.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if !app.siliconFlowConfigured {
+                                    Text("No SiliconFlow key yet. Create one at siliconflow.cn and add it in the API Keys tab with provider SiliconFlow.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                        }
+                        if gen.isOpenAICompat {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Any endpoint that implements POST {base}/v1/images/generations: OpenAI, Together AI, LocalAI, gateways. The base URL is stored with the key. Model ids are free-typed; the suggestion list merges curated names with the endpoint's /v1/models via the refresh button where available.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if !app.openAICompatConfigured {
+                                    Text("No OpenAI-Compatible key yet. Add one in the API Keys tab with the endpoint base URL.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                        }
 
                         LabeledContent("Model") {
                             HStack(spacing: 6) {
@@ -231,7 +267,7 @@ struct GenerateView: View {
                                 .pickerStyle(.menu)
                                 .labelsHidden()
                                 .frame(maxWidth: 300)
-                            } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace || gen.isMeta {
+                            } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace || gen.isMeta || gen.isOpenAIImages {
                                 Picker("", selection: $gen.size) {
                                     ForEach(ModelCatalog.freeAspectRatios, id: \.self) { Text($0).tag($0) }
                                 }
@@ -371,7 +407,7 @@ struct GenerateView: View {
                 if gen.isMiniMax {
                     if !ModelCatalog.minimaxAspectRatios.contains(gen.size) { gen.size = "1:1" }
                     if gen.count > 9 { gen.count = 9 }
-                } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace || gen.isMeta {
+                } else if gen.isPollinations || gen.isGemini || gen.isCloudflare || gen.isHuggingFace || gen.isMeta || gen.isOpenAIImages {
                     if !ModelCatalog.freeAspectRatios.contains(gen.size) { gen.size = "1:1" }
                     if gen.count > 4 { gen.count = 4 }
                 } else {
@@ -451,19 +487,24 @@ struct GenerateView: View {
         if app.generate.isCloudflare { return ModelCatalog.cloudflareImageModels }
         if app.generate.isHuggingFace { return ModelCatalog.huggingFaceImageModels }
         if app.generate.isMeta { return ModelCatalog.metaMuseImageModels }
+        if app.generate.isDeepInfra { return ModelCatalog.deepInfraImageModels }
+        if app.generate.isSiliconFlow { return ModelCatalog.siliconFlowImageModels }
+        if app.generate.isOpenAICompat { return ModelCatalog.openAICompatImageModels }
         return ModelCatalog.imageModels
     }
     private var countRange: ClosedRange<Int> {
         if app.generate.isMiniMax { return 1...9 }
         if app.generate.isPollinations || app.generate.isGemini
-            || app.generate.isCloudflare || app.generate.isHuggingFace { return 1...4 }
+            || app.generate.isCloudflare || app.generate.isHuggingFace
+            || app.generate.isOpenAIImages { return 1...4 }
         if app.generate.isMeta { return 1...4 }
         return 1...6
     }
     private var countCaption: String {
         if app.generate.isMiniMax { return "MiniMax returns \(app.generate.count) images in one request." }
         if app.generate.isPollinations || app.generate.isGemini
-            || app.generate.isCloudflare || app.generate.isHuggingFace {
+            || app.generate.isCloudflare || app.generate.isHuggingFace
+            || app.generate.isOpenAIImages {
             return "Runs \(app.generate.count) requests in sequence."
         }
         if app.generate.isMeta {

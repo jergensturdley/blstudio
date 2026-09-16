@@ -233,10 +233,62 @@ final class KeysStore {
         if let data = try? Data(contentsOf: AppPaths.keysFile),
            let decoded = try? JSONDecoder().decode(Persisted.self, from: data) {
             keys = decoded.keys
-            // Old `activeKeyId` is intentionally dropped. No migration is run
-            // because the provider-specific preference will be set the next
-            // time the user changes it from Settings.
+            // Old `activeKeyId` is intentionally dropped; the per-provider
+            // preference replaces it. Call migrateLegacyProviderAttribution
+            // (from AppState) to re-tag keys stored before providers existed.
         }
+    }
+
+    /// One-time repair for keys stored by builds before provider-aware keys:
+    /// those entries have `provider == nil` and every provider resolution
+    /// treated them as Bailian, which made MiniMax/Gemini/Cloudflare/HF look
+    /// unconfigured and left their per-provider pickers empty. Infers the
+    /// provider from well-known key prefixes and the usage ledger's per-key
+    /// model labels, then persists the corrected attribution.
+    func migrateLegacyProviderAttribution(ledger: UsageLedger) {
+        guard keys.contains(where: { $0.provider == nil }) else { return }
+        var changed = false
+        for i in keys.indices where keys[i].provider == nil {
+            if let inferred = Self.inferProvider(masked: keys[i].masked,
+                                                 events: ledger.events, keyId: keys[i].id) {
+                keys[i].provider = inferred
+                changed = true
+            }
+        }
+        if changed { save() }
+    }
+
+    /// Best-effort provider inference for a legacy key. Prefixes win (they are
+    /// deterministic); otherwise the usage ledger's provider-tagged display
+    /// models ("Cloudflare …", "MiniMax …") vote by majority. Returns nil when
+    /// nothing is conclusive — the key then stays on the Bailian default and
+    /// the user can fix it in Settings → Per-provider API key.
+    /// Nonisolated + event-snapshot parameter so headless self-tests can call
+    /// it off the main actor.
+    nonisolated static func inferProvider(masked: String, events: [UsageEvent], keyId: UUID) -> KeyProvider? {
+        let prefixMap: [(prefix: String, provider: KeyProvider)] = [
+            ("hf_", .huggingface),
+            ("AIza", .gemini),
+            ("AQ.", .gemini),     // Google API keys v2 (AI Studio "AQ.Ab8…")
+            ("eyJ", .minimax),    // MiniMax JWT tokens
+        ]
+        for entry in prefixMap where masked.hasPrefix(entry.prefix) {
+            return entry.provider
+        }
+
+        var votes: [KeyProvider: Int] = [:]
+        for e in events where e.keyId == keyId {
+            let m = e.model ?? ""
+            let provider: KeyProvider?
+            if m.hasPrefix("MiniMax ") { provider = .minimax }
+            else if m.hasPrefix("Cloudflare ") { provider = .cloudflare }
+            else if m.hasPrefix("Hugging Face ") { provider = .huggingface }
+            else if m.hasPrefix("Gemini ") { provider = .gemini }
+            else if m.hasPrefix("Meta Muse ") { provider = .meta }
+            else { provider = nil }   // bare model ids are ambiguous, no vote
+            if let provider { votes[provider, default: 0] += 1 }
+        }
+        return votes.max { $0.value < $1.value }?.key
     }
 
     /// Resolves the API key for `provider`: the per-provider preference from
@@ -327,6 +379,22 @@ final class KeysStore {
     var activeMetaMuseMeta: APIKeyMeta? { activeMeta(for: .meta) }
     var activeMetaMuseSecret: String? { activeSecret(for: .meta) }
     func activeMetaMuseLabel() -> String { activeLabel(for: .meta) }
+
+    var deepInfraConfigured: Bool { keys.contains { $0.isDeepInfra } }
+    var activeDeepInfraMeta: APIKeyMeta? { activeMeta(for: .deepinfra) }
+    var activeDeepInfraSecret: String? { activeSecret(for: .deepinfra) }
+    func activeDeepInfraLabel() -> String { activeLabel(for: .deepinfra) }
+
+    var siliconFlowConfigured: Bool { keys.contains { $0.isSiliconFlow } }
+    var activeSiliconFlowMeta: APIKeyMeta? { activeMeta(for: .siliconflow) }
+    var activeSiliconFlowSecret: String? { activeSecret(for: .siliconflow) }
+    func activeSiliconFlowLabel() -> String { activeLabel(for: .siliconflow) }
+
+    var openAICompatConfigured: Bool { keys.contains { $0.isOpenAICompat } }
+    var activeOpenAICompatMeta: APIKeyMeta? { activeMeta(for: .openaiCompat) }
+    var activeOpenAICompatSecret: String? { activeSecret(for: .openaiCompat) }
+    var activeOpenAICompatBaseURL: String? { activeOpenAICompatMeta?.accountId }
+    func activeOpenAICompatLabel() -> String { activeLabel(for: .openaiCompat) }
 
     func updateLabel(_ id: UUID, label: String) {
         guard let i = keys.firstIndex(where: { $0.id == id }) else { return }

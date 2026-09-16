@@ -285,6 +285,40 @@ enum SelfTest {
             print("SKIP  live mmx integration (binary not found)")
         }
 
+        // 12. Legacy key→provider attribution (regression: pre-provider builds
+        // stored keys without a provider tag and every key resolved to Bailian).
+        do {
+            let cfId = UUID()
+            let events = [UsageEvent(
+                keyId: cfId, kind: .imageGenerate,
+                model: "Cloudflare @cf/black-forest-labs/flux-1-schnell",
+                at: Date(), images: 1, promptTokens: 0,
+                completionTokens: 0, durationMs: 10, ok: true)]
+            check("legacy key prefix inference",
+                  KeysStore.inferProvider(masked: "hf_sMW…HKmw", events: events, keyId: UUID()) == .huggingface
+                  && KeysStore.inferProvider(masked: "AQ.Ab8…oQxg", events: events, keyId: UUID()) == .gemini
+                  && KeysStore.inferProvider(masked: "eyJhbGci…", events: events, keyId: UUID()) == .minimax)
+            check("legacy key ledger-vote inference",
+                  KeysStore.inferProvider(masked: "cfut_9…1074", events: events, keyId: cfId) == .cloudflare)
+            check("legacy key unknown stays nil",
+                  KeysStore.inferProvider(masked: "sk-ws-…in98", events: events, keyId: UUID()) == nil)
+        }
+
+        // 13. OpenAI-compatible images response decoding (DeepInfra /
+        // SiliconFlow / custom endpoints all return this shape).
+        do {
+            let b64 = Data("hello".utf8).base64EncodedString()
+            let json = """
+            {"data":[{"b64_json":"\(b64)"},{"url":"https://example.com/b.png"}]}
+            """
+            if let r = try? JSONDecoder().decode(ImagesResponse.self, from: Data(json.utf8)) {
+                check("openai-images response decode",
+                      r.data.count == 2 && r.data[0].b64_json == b64 && r.data[1].url != nil)
+            } else {
+                check("openai-images response decode", false)
+            }
+        }
+
         print(failures == 0 ? "\nAll self-tests passed." : "\n\(failures) self-test(s) FAILED.")
         return failures == 0 ? 0 : 1
     }

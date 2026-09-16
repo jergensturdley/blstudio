@@ -256,6 +256,42 @@ enum SmokeTest {
             case .pollinations:
                 check(label, true, "keyless")
 
+            case .deepinfra, .siliconflow, .openaiCompat:
+                // Validation is a real (tiny) generation for DeepInfra and a
+                // key-gated /v1/models listing for the others.
+                do {
+                    let p: OpenAIImagesClient.Provider
+                    if key.isDeepInfra {
+                        p = .deepinfra
+                    } else if key.isSiliconFlow {
+                        p = .siliconflow
+                    } else {
+                        let base = key.accountId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        guard !base.isEmpty else {
+                            check(label, false, "missing base URL")
+                            continue
+                        }
+                        p = .custom(baseURL: base)
+                    }
+                    let msg = try await app.openAIImages.validate(provider: p, apiKey: secret)
+                    check(label, true, msg)
+                } catch { check(label, false, error.localizedDescription) }
+                if full, key.isDeepInfra || key.isSiliconFlow {
+                    do {
+                        let dest = tmp.appendingPathComponent("\(key.resolvedProvider.rawValue).png")
+                        let model = key.isDeepInfra
+                            ? "black-forest-labs/FLUX-1-schnell" : "black-forest-labs/FLUX.1-schnell"
+                        _ = try await app.openAIImages.generate(
+                            provider: key.isDeepInfra ? .deepinfra : .siliconflow,
+                            apiKey: secret,
+                            request: OpenAIImagesClient.Request(
+                                model: model, prompt: "a tiny red dot",
+                                size: "256x256", n: 1),
+                            dest: dest)
+                        check("\(label) image", true, "saved \(dest.lastPathComponent)")
+                    } catch { check("\(label) image", false, error.localizedDescription) }
+                }
+
             case .meta:
                 do {
                     let msg = try await app.metaMuse.validate(apiKey: secret)

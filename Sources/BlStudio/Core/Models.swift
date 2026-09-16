@@ -233,6 +233,11 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
     case cloudflare = "cloudflare"
     case huggingface = "huggingface"
     case meta = "meta"
+    case deepinfra = "deepinfra"
+    case siliconflow = "siliconflow"
+    /// User-supplied OpenAI-compatible endpoint. The key's `accountId` holds
+    /// the base URL (e.g. https://api.openai.com).
+    case openaiCompat = "openai-compat"
 
     var label: String {
         switch self {
@@ -244,6 +249,9 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
         case .cloudflare: return "Cloudflare Workers AI"
         case .huggingface: return "Hugging Face"
         case .meta: return "Meta Muse Image"
+        case .deepinfra: return "DeepInfra"
+        case .siliconflow: return "SiliconFlow"
+        case .openaiCompat: return "OpenAI-Compatible"
         }
     }
 
@@ -254,6 +262,7 @@ enum KeyProvider: String, Codable, Sendable, CaseIterable {
     /// respect the Settings on/off switches).
     static let imageProviders: [KeyProvider] = [
         .bailian, .minimax, .pollinations, .gemini, .cloudflare, .huggingface, .meta,
+        .deepinfra, .siliconflow, .openaiCompat,
     ]
     static let videoProviders: [KeyProvider] = [.bailian, .minimax]
     static let speechProviders: [KeyProvider] = [.minimax, .fish]
@@ -278,4 +287,7 @@ struct APIKeyMeta: Codable, Identifiable, Sendable {
     var isCloudflare: Bool { resolvedProvider == .cloudflare }
     var isHuggingFace: Bool { resolvedProvider == .huggingface }
     var isMeta: Bool { resolvedProvider == .meta }
+    var isDeepInfra: Bool { resolvedProvider == .deepinfra }
+    var isSiliconFlow: Bool { resolvedProvider == .siliconflow }
+    var isOpenAICompat: Bool { resolvedProvider == .openaiCompat }
 }

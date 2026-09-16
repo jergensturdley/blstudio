@@ -18,6 +18,9 @@ struct KeysView: View {
         case .fish: return "Fish Audio API key"
         case .cloudflare: return "Cloudflare API token"
         case .huggingface: return "hf…"
+        case .deepinfra: return "DeepInfra API token"
+        case .siliconflow: return "sk-… (SiliconFlow)"
+        case .openaiCompat: return "API key for the endpoint"
         default: return "sk-…"
         }
     }
@@ -25,7 +28,13 @@ struct KeysView: View {
     private func keyCaption(_ key: APIKeyMeta) -> String {
         var parts = [key.masked, "added \(Fmt.shortDate.string(from: key.createdAt))"]
         if let acct = key.accountId, !acct.isEmpty {
-            let label = key.isCloudflare ? "account" : "provider"
+            let label: String
+            switch key.resolvedProvider {
+            case .cloudflare: label = "account"
+            case .huggingface: label = "provider"
+            case .openaiCompat: label = "base URL"
+            default: label = "provider"
+            }
             parts.append("\(label): \(acct)")
         }
         return parts.joined(separator: " · ")
@@ -136,6 +145,13 @@ struct KeysView: View {
                                     .textFieldStyle(.roundedBorder)
                             }
                         }
+                        if newProvider == .openaiCompat {
+                            GridRow {
+                                Text("Base URL").foregroundStyle(.secondary)
+                                TextField("https://api.openai.com", text: $newAccountId)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
                     }
                     HStack {
                         Button {
@@ -202,6 +218,11 @@ struct KeysView: View {
             errorMessage = "Cloudflare keys need an Account ID."
             return
         }
+        if newProvider == .openaiCompat
+            && newAccountId.trimmingCharacters(in: .whitespaces).isEmpty {
+            errorMessage = "OpenAI-Compatible keys need a base URL (e.g. https://api.openai.com)."
+            return
+        }
         do {
             _ = try app.keysStore.add(label: newLabel, secret: newSecret, provider: newProvider,
                                       accountId: newAccountId)
@@ -242,6 +263,21 @@ struct KeysView: View {
                 testResult[key.id] = msg
             } else if key.isMeta {
                 let msg = try await app.metaMuse.validate(apiKey: secret)
+                testResult[key.id] = msg
+            } else if key.isDeepInfra {
+                let msg = try await app.openAIImages.validate(provider: .deepinfra, apiKey: secret)
+                testResult[key.id] = msg
+            } else if key.isSiliconFlow {
+                let msg = try await app.openAIImages.validate(provider: .siliconflow, apiKey: secret)
+                testResult[key.id] = msg
+            } else if key.isOpenAICompat {
+                let base = key.accountId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !base.isEmpty else {
+                    testResult[key.id] = "Missing base URL"
+                    return
+                }
+                let msg = try await app.openAIImages.validate(
+                    provider: .custom(baseURL: base), apiKey: secret)
                 testResult[key.id] = msg
             } else {
                 var req = ChatRequest(message: "ping")

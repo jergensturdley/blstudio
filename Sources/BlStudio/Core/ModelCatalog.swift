@@ -117,6 +117,34 @@ enum ModelCatalog {
         MetaMuseClient.imageModel,
     ]
 
+    /// DeepInfra image models (OpenAI-compatible /v1/images/generations,
+    /// b64_json responses). FLUX.2 Klein + FLUX.1 are the reliable cheap ones.
+    static let deepInfraImageModels = [
+        "black-forest-labs/FLUX-2-klein-4B",
+        "black-forest-labs/FLUX-2-klein-9B",
+        "black-forest-labs/FLUX-1-schnell",
+        "black-forest-labs/FLUX-1-dev",
+    ]
+
+    /// SiliconFlow image models (image_size/batch_size request schema).
+    /// Qwen-Image fits this app's Bailian/qwen roots; FLUX and Kolors round it
+    /// out. Free tier exists for some models; paid models are cheap.
+    static let siliconFlowImageModels = [
+        "Qwen/Qwen-Image",
+        "Qwen/Qwen-Image-Edit",
+        "black-forest-labs/FLUX.1-schnell",
+        "black-forest-labs/FLUX.1-dev",
+        "Kwai-Kolors/Kolors",
+    ]
+
+    /// Starting points for the free-typed OpenAI-Compatible provider. Real
+    /// suggestions depend on the endpoint; users type whatever their gateway
+    /// exposes.
+    static let openAICompatImageModels = [
+        "gpt-image-1",
+        "togethercomputer/FLUX.1-schnell",
+    ]
+
     /// Aspect ratios shared by the free providers.
     static let freeAspectRatios = [
         "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3",

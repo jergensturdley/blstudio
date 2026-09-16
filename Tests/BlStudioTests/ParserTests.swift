@@ -190,3 +190,61 @@ final class LedgerTests: XCTestCase {
         XCTAssertEqual(series.last?.images, 2)
     }
 }
+
+/// Regression tests for legacy key→provider attribution. Builds before
+/// provider-aware keys stored keys with no `provider` tag; the migration
+/// infers it from key prefixes and the usage ledger.
+final class LegacyKeyMigrationTests: XCTestCase {
+
+    private func makeLedger(events: [(key: UUID, model: String?)]) -> UsageLedger {
+        let ledger = UsageLedger(fileURL: AppPaths.makeTempUsageFile())
+        for e in events {
+            ledger.record(UsageEvent(keyId: e.key, kind: .imageGenerate, model: e.model,
+                                     at: Date(), images: 1, promptTokens: 0,
+                                     completionTokens: 0, durationMs: 10, ok: true))
+        }
+        return ledger
+    }
+
+    @MainActor
+    func testPrefixInference() {
+        let id = UUID()
+        let ledger = makeLedger(events: [])
+        XCTAssertEqual(KeysStore.inferProvider(masked: "hf_sMW…HKmw", events: ledger.events, keyId: id), .huggingface)
+        XCTAssertEqual(KeysStore.inferProvider(masked: "AIzaSy…", events: ledger.events, keyId: id), .gemini)
+        XCTAssertEqual(KeysStore.inferProvider(masked: "AQ.Ab8…oQxg", events: ledger.events, keyId: id), .gemini)
+        XCTAssertEqual(KeysStore.inferProvider(masked: "eyJhbGci…", events: ledger.events, keyId: id), .minimax)
+    }
+
+    @MainActor
+    func testLedgerVoteInference() {
+        // Cloudflare tokens have no stable prefix; the ledger's provider-tagged
+        // display models are the evidence.
+        let id = UUID()
+        let ledger = makeLedger(events: [
+            (id, "Cloudflare @cf/black-forest-labs/flux-1-schnell"),
+            (id, "Cloudflare @cf/bytedance/stable-diffusion-xl-lightning"),
+            (id, "Cloudflare wan2.7-image"),
+        ])
+        XCTAssertEqual(KeysStore.inferProvider(masked: "cfut_9…1074", events: ledger.events, keyId: id), .cloudflare)
+    }
+
+    @MainActor
+    func testLedgerVoteBeatsAmbiguousBareModels() {
+        // "sk-cp-" could be anything; the ledger's MiniMax entries decide.
+        let id = UUID()
+        let ledger = makeLedger(events: [
+            (id, "MiniMax image-01"),
+            (id, "MiniMax image-01"),
+            (id, "qwen-image-2.0-pro"),   // bare model id: no vote
+        ])
+        XCTAssertEqual(KeysStore.inferProvider(masked: "sk-cp-…ewJE", events: ledger.events, keyId: id), .minimax)
+    }
+
+    @MainActor
+    func testUnknownWhenNoEvidence() {
+        let id = UUID()
+        let ledger = makeLedger(events: [])
+        XCTAssertNil(KeysStore.inferProvider(masked: "sk-ws-…in98", events: ledger.events, keyId: id))
+    }
+}

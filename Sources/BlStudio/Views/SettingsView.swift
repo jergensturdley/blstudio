@@ -224,6 +224,9 @@ struct SettingsView: View {
         case .cloudflare: return "Free-tier images (Workers AI FLUX)"
         case .huggingface: return "Images via inference providers"
         case .meta: return "Meta Muse Image ($0.01 per image)"
+        case .deepinfra: return "Cheap FLUX images (OpenAI-compatible)"
+        case .siliconflow: return "Qwen-Image, FLUX, Kolors (OpenAI-compatible)"
+        case .openaiCompat: return "Any OpenAI-compatible images endpoint"
         }
     }
 

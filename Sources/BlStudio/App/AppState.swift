@@ -14,6 +14,7 @@ final class AppState {
     let cloudflare = CloudflareClient()
     let huggingface = HuggingFaceClient()
     let metaMuse = MetaMuseClient()
+    let openAIImages = OpenAIImagesClient()
     let mmx = MmxClient()
     @ObservationIgnored let settingsStore = SettingsStore()
     @ObservationIgnored lazy var keysStore = KeysStore(settings: settingsStore)
@@ -37,6 +38,10 @@ final class AppState {
     init() {
         client.binaryOverride = settingsStore.settings.blBinaryPath.nonEmptyOrNil
         mmx.binaryOverride = (settingsStore.settings.mmxBinaryPath ?? "").nonEmptyOrNil
+        // Repair key entries written by pre-provider builds (they carry no
+        // provider tag and resolve everything to Bailian). Prefix + ledger
+        // inference; a no-op when every key already has a provider.
+        keysStore.migrateLegacyProviderAttribution(ledger: ledger)
         generate = GenerateModel(app: self)
         edit = EditModel(app: self)
         chat = ChatModel(app: self)
@@ -102,6 +107,23 @@ final class AppState {
     var metaMuseSecret: String? { keysStore.activeMetaMuseSecret }
     var metaMuseKeyId: UUID? { keysStore.activeMetaMuseMeta?.id }
     var metaMuseKeyLabel: String { keysStore.activeMetaMuseLabel() }
+
+    /// DeepInfra / SiliconFlow / custom OpenAI-compatible key resolution.
+    var deepInfraConfigured: Bool { keysStore.deepInfraConfigured }
+    var deepInfraSecret: String? { keysStore.activeDeepInfraSecret }
+    var deepInfraKeyId: UUID? { keysStore.activeDeepInfraMeta?.id }
+    var deepInfraKeyLabel: String { keysStore.activeDeepInfraLabel() }
+
+    var siliconFlowConfigured: Bool { keysStore.siliconFlowConfigured }
+    var siliconFlowSecret: String? { keysStore.activeSiliconFlowSecret }
+    var siliconFlowKeyId: UUID? { keysStore.activeSiliconFlowMeta?.id }
+    var siliconFlowKeyLabel: String { keysStore.activeSiliconFlowLabel() }
+
+    var openAICompatConfigured: Bool { keysStore.openAICompatConfigured }
+    var openAICompatSecret: String? { keysStore.activeOpenAICompatSecret }
+    var openAICompatKeyId: UUID? { keysStore.activeOpenAICompatMeta?.id }
+    var openAICompatKeyLabel: String { keysStore.activeOpenAICompatLabel() }
+    var openAICompatBaseURL: String? { keysStore.activeOpenAICompatBaseURL }
 
     /// Provider on/off switches from Settings.
     func isProviderEnabled(_ p: KeyProvider) -> Bool {
@@ -291,32 +313,22 @@ final class GenerateModel {
     var isCloudflare: Bool { provider == KeyProvider.cloudflare.rawValue }
     var isHuggingFace: Bool { provider == KeyProvider.huggingface.rawValue }
     var isMeta: Bool { provider == KeyProvider.meta.rawValue }
+    var isDeepInfra: Bool { provider == KeyProvider.deepinfra.rawValue }
+    var isSiliconFlow: Bool { provider == KeyProvider.siliconflow.rawValue }
+    var isOpenAICompat: Bool { provider == KeyProvider.openaiCompat.rawValue }
+    /// Providers served by the shared OpenAI-images client.
+    var isOpenAIImages: Bool { isDeepInfra || isSiliconFlow || isOpenAICompat }
 
     func generate() async {
-        if isMiniMax {
-            await generateMiniMax()
-            return
-        }
-        if isPollinations {
-            await generatePollinations()
-            return
-        }
-        if isGemini {
-            await generateGemini()
-            return
-        }
-        if isCloudflare {
-            await generateCloudflare()
-            return
-        }
-        if isHuggingFace {
-            await generateHuggingFace()
-            return
-        }
-        if isMeta {
-            await generateMetaMuse()
-            return
-        }
+        if isMiniMax { await generateMiniMax(); return }
+        if isPollinations { await generatePollinations(); return }
+        if isGemini { await generateGemini(); return }
+        if isCloudflare { await generateCloudflare(); return }
+        if isHuggingFace { await generateHuggingFace(); return }
+        if isMeta { await generateMetaMuse(); return }
+        if isDeepInfra { await generateOpenAIImages(.deepinfra); return }
+        if isSiliconFlow { await generateOpenAIImages(.siliconflow); return }
+        if isOpenAICompat { await generateOpenAIImages(nil); return }
         guard canRun else { return }
 
         let seedValue: Int?
@@ -784,6 +796,134 @@ final class GenerateModel {
                 keyId: app.metaMuseKeyId, keyLabel: app.metaMuseKeyLabel,
                 savedPaths: [], remoteUrls: [], taskId: nil,
                 durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    /// Generates images via DeepInfra, SiliconFlow, or a user-supplied
+    /// OpenAI-compatible endpoint (`POST {base}/v1/images/generations`).
+    /// Sequential per-image requests with offset seeds, matching the other
+    /// HTTP providers.
+    private func generateOpenAIImages(_ fixedProvider: OpenAIImagesClient.Provider?) async {
+        guard canRun else { return }
+
+        let configuredProvider: OpenAIImagesClient.Provider
+        let secret: String?
+        let keyId: UUID?
+        let keyLabel: String
+        let displayPrefix: String
+        switch provider {
+        case KeyProvider.deepinfra.rawValue:
+            configuredProvider = .deepinfra
+            secret = app.deepInfraSecret
+            keyId = app.deepInfraKeyId
+            keyLabel = app.deepInfraKeyLabel
+            displayPrefix = "DeepInfra"
+        case KeyProvider.siliconflow.rawValue:
+            configuredProvider = .siliconflow
+            secret = app.siliconFlowSecret
+            keyId = app.siliconFlowKeyId
+            keyLabel = app.siliconFlowKeyLabel
+            displayPrefix = "SiliconFlow"
+        case KeyProvider.openaiCompat.rawValue:
+            guard let base = app.openAICompatBaseURL?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !base.isEmpty else {
+                phase = .failed("This OpenAI-Compatible key has no base URL. Re-add it in the API Keys tab with the endpoint base (e.g. https://api.openai.com).")
+                return
+            }
+            configuredProvider = .custom(baseURL: base)
+            secret = app.openAICompatSecret
+            keyId = app.openAICompatKeyId
+            keyLabel = app.openAICompatKeyLabel
+            displayPrefix = "OpenAI-Compatible"
+        default:
+            guard let fixed = fixedProvider else {
+                phase = .failed("No provider selected.")
+                return
+            }
+            configuredProvider = fixed
+            secret = nil
+            keyId = nil
+            keyLabel = ""
+            displayPrefix = "OpenAI-Compatible"
+        }
+
+        guard let apiKey = secret else {
+            phase = .failed("No \(displayPrefix) API key configured. Add one in the API Keys tab with provider \(displayPrefix).")
+            return
+        }
+
+        let ratio = ModelCatalog.freeAspectRatios.contains(size) ? size : "1:1"
+        let (w, h) = ModelCatalog.pixelSize(forAspectRatio: ratio)
+        let modelUsed = model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? Self.defaultOpenAIImagesModel(for: configuredProvider) : model
+        let displayModel = "\(displayPrefix) \(modelUsed)"
+        let promptText = composedPrompt
+
+        let baseSeed: Int?
+        do {
+            baseSeed = try parseSeed(enabled: seedEnabled, text: seedText)
+        } catch {
+            phase = .failed(error.localizedDescription)
+            return
+        }
+
+        phase = .running
+        progressLine = "Contacting \(displayPrefix)…"
+        lastResult = nil
+        lastSavedPaths = []
+
+        let outDir = app.settingsStore.settings.libraryURL
+        AppPaths.ensureDir(outDir)
+        let prefix = AppState.outPrefix(for: prompt, kind: "img")
+        let started = Date()
+
+        do {
+            var saved: [String] = []
+            let total = max(1, count)
+            for i in 0..<total {
+                progressLine = "Generating image \(i + 1)/\(total)…"
+                let dest = outDir.appendingPathComponent("\(prefix)-\(i + 1).png")
+                let urls = try await app.openAIImages.generate(
+                    provider: configuredProvider, apiKey: apiKey,
+                    request: OpenAIImagesClient.Request(
+                        model: modelUsed, prompt: promptText,
+                        size: "\(w)x\(h)", n: 1,
+                        seed: baseSeed.map { $0 + i }),
+                    dest: dest)
+                saved.append(contentsOf: urls.map(\.path))
+            }
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            lastSavedPaths = saved
+            phase = .done
+            app.recordUsage(kind: .imageGenerate, model: displayModel, images: saved.count,
+                            durationMs: ms, ok: true, keyIdOverride: keyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: keyId, keyLabel: keyLabel,
+                savedPaths: saved, remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: true, detail: nil))
+        } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            phase = .failed(error.localizedDescription)
+            app.recordUsage(kind: .imageGenerate, model: displayModel,
+                            durationMs: ms, ok: false, keyIdOverride: keyId)
+            app.history.add(HistoryEntry(
+                kind: .imageGenerate, prompt: promptText, model: displayModel,
+                keyId: keyId, keyLabel: keyLabel,
+                savedPaths: [], remoteUrls: [], taskId: nil,
+                durationMs: ms, ok: false, detail: error.localizedDescription))
+        }
+    }
+
+    /// Default model per OpenAI-images provider when the user leaves the field
+    /// empty (matches the pattern of the other providers' baked-in defaults).
+    nonisolated private static func defaultOpenAIImagesModel(
+        for p: OpenAIImagesClient.Provider
+    ) -> String {
+        switch p {
+        case .deepinfra: return "black-forest-labs/FLUX-2-klein-4B"
+        case .siliconflow: return "Qwen/Qwen-Image"
+        case .custom: return "gpt-image-1"
         }
     }
 
