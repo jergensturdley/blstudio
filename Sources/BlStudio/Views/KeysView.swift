@@ -7,6 +7,7 @@ struct KeysView: View {
     @State private var newSecret = ""
     @State private var newProvider: KeyProvider = .bailian
     @State private var newAccountId = ""
+    @State private var newBaseUrl = ""
     @State private var errorMessage: String?
     @State private var testResult: [UUID: String] = [:]
     @State private var testing: UUID?
@@ -25,6 +26,14 @@ struct KeysView: View {
         }
     }
 
+    private var newKeyBaseUrlPrompt: String? {
+        switch newProvider {
+        case .bailian: return "e.g. https://token-plan.cn-beijing.maas.aliyuncs.com (blank: active bl profile)"
+        case .openaiCompat: return "https://api.openai.com"
+        default: return nil
+        }
+    }
+
     private func keyCaption(_ key: APIKeyMeta) -> String {
         var parts = [key.masked, "added \(Fmt.shortDate.string(from: key.createdAt))"]
         if let acct = key.accountId, !acct.isEmpty {
@@ -36,6 +45,9 @@ struct KeysView: View {
             default: label = "provider"
             }
             parts.append("\(label): \(acct)")
+        }
+        if key.resolvedProvider == .bailian, let base = key.baseUrl, !base.isEmpty {
+            parts.append("endpoint: \(base)")
         }
         return parts.joined(separator: " · ")
     }
@@ -152,6 +164,15 @@ struct KeysView: View {
                                     .textFieldStyle(.roundedBorder)
                             }
                         }
+                        if let prompt = newKeyBaseUrlPrompt, newProvider != .openaiCompat {
+                            // Bailian: optional endpoint override (e.g. Qwen Cloud
+                            // token-plan). Other providers don't use it.
+                            GridRow {
+                                Text("Base URL").foregroundStyle(.secondary)
+                                TextField(prompt, text: $newBaseUrl)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
                     }
                     HStack {
                         Button {
@@ -225,10 +246,12 @@ struct KeysView: View {
         }
         do {
             _ = try app.keysStore.add(label: newLabel, secret: newSecret, provider: newProvider,
-                                      accountId: newAccountId)
+                                      accountId: newAccountId,
+                                      baseUrl: newProvider == .bailian ? newBaseUrl : nil)
             newLabel = ""
             newSecret = ""
             newAccountId = ""
+            newBaseUrl = ""
             newProvider = .bailian
         } catch {
             errorMessage = error.localizedDescription
@@ -282,7 +305,7 @@ struct KeysView: View {
             } else {
                 var req = ChatRequest(message: "ping")
                 req.maxTokens = 1
-                let completion = try await app.client.textChat(req, apiKey: secret, timeoutSeconds: 60)
+                let completion = try await app.client.textChat(req, baseUrl: app.bailianBaseUrl, apiKey: secret, timeoutSeconds: 60)
                 testResult[key.id] = "OK · \(completion.model ?? "model")"
             }
         } catch {

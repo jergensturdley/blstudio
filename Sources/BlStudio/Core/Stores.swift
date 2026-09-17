@@ -319,7 +319,7 @@ final class KeysStore {
     }
 
     func add(label: String, secret: String, provider: KeyProvider = .bailian,
-             accountId: String? = nil) throws -> APIKeyMeta {
+             accountId: String? = nil, baseUrl: String? = nil) throws -> APIKeyMeta {
         let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 8 else {
             throw NSError(domain: "BlStudio", code: 1,
@@ -330,6 +330,10 @@ final class KeysStore {
         meta.provider = provider
         let acct = accountId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         meta.accountId = acct.isEmpty ? nil : acct
+        // Bailian keys may carry a per-key endpoint override (--base-url);
+        // other providers ignore it.
+        let base = baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        meta.baseUrl = base.isEmpty ? nil : base
         try Keychain.setSecret(trimmed, account: meta.id.uuidString)
         keys.append(meta)
         // If this is the first key of its provider, make it the preferred one
@@ -346,6 +350,8 @@ final class KeysStore {
     var bailianConfigured: Bool { keys.contains { $0.resolvedProvider == .bailian } }
     var activeBailianMeta: APIKeyMeta? { activeMeta(for: .bailian) }
     var activeBailianSecret: String? { activeSecret(for: .bailian) }
+    /// Base URL carried on the active Bailian key (nil → active bl profile).
+    var activeBailianBaseUrl: String? { activeBailianMeta?.baseUrl }
     func activeBailianLabel() -> String { activeLabel(for: .bailian) }
 
     var miniMaxConfigured: Bool { keys.contains { $0.isMiniMax } }

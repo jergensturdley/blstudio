@@ -69,6 +69,10 @@ final class AppState {
     var bailianSecret: String? { keysStore.activeBailianSecret }
     var bailianKeyId: UUID? { keysStore.activeBailianMeta?.id }
     var bailianKeyLabel: String { keysStore.activeBailianLabel() }
+    /// Per-key endpoint override for the active Bailian key (nil → whatever
+    /// base URL the active `bl` profile already has; e.g. the Qwen Cloud
+    /// token-plan endpoint when the key carries it).
+    var bailianBaseUrl: String? { keysStore.activeBailianBaseUrl }
 
     /// MiniMax key resolution (independent of the Bailian active key).
     var miniMaxConfigured: Bool { keysStore.miniMaxConfigured }
@@ -284,7 +288,7 @@ final class GenerateModel {
 
         let started = Date()
         do {
-            let completion = try await app.client.textChat(req, apiKey: app.bailianSecret)
+            let completion = try await app.client.textChat(req, baseUrl: app.bailianBaseUrl, apiKey: app.bailianSecret)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             app.recordUsage(kind: .chat, model: req.model,
                             promptTokens: completion.usage?.prompt_tokens ?? 0,
@@ -364,6 +368,7 @@ final class GenerateModel {
                 result = try await app.client.imageGenerate(
                     req, outDir: outDir,
                     outPrefix: AppState.outPrefix(for: prompt, kind: "img"),
+                    baseUrl: app.bailianBaseUrl,
                     apiKey: app.bailianSecret,
                     pollInterval: settings.pollInterval,
                     timeoutSeconds: settings.requestTimeout,
@@ -942,6 +947,7 @@ final class GenerateModel {
     ) async throws -> ImageGenerationResult {
         let basePrefix = AppState.outPrefix(for: prompt, kind: "img")
         let apiKey = app.bailianSecret
+        let baseUrl = app.bailianBaseUrl
         let client = app.client
 
         return try await withThrowingTaskGroup(of: (Int, ImageGenerationResult).self) { group in
@@ -953,6 +959,7 @@ final class GenerateModel {
                     let result = try await client.imageGenerate(
                         sub, outDir: outDir,
                         outPrefix: "\(basePrefix)-\(index + 1)",
+                        baseUrl: baseUrl,
                         apiKey: apiKey,
                         pollInterval: pollInterval,
                         timeoutSeconds: timeoutSeconds,
@@ -1036,7 +1043,7 @@ final class GenerateModel {
             // Falls back to `bl usage free`'s catalog when the model list endpoint
             // is unreachable (e.g. console session expired); that's still better
             // than an empty list.
-            let ids = try await app.client.listModels(capability: "IG")
+            let ids = try await app.client.listModels(capability: "IG", baseUrl: app.bailianBaseUrl)
             return (ids, "bl model list (IG)")
 
         case .pollinations:
@@ -1155,6 +1162,7 @@ final class EditModel {
                 result = try await app.client.imageEdit(
                     req, outDir: outDir,
                     outPrefix: AppState.outPrefix(for: prompt, kind: "edit"),
+                    baseUrl: app.bailianBaseUrl,
                     apiKey: app.bailianSecret,
                     pollInterval: settings.pollInterval,
                     timeoutSeconds: settings.requestTimeout,
@@ -1203,6 +1211,7 @@ final class EditModel {
     ) async throws -> ImageGenerationResult {
         let basePrefix = AppState.outPrefix(for: prompt, kind: "edit")
         let apiKey = app.bailianSecret
+        let baseUrl = app.bailianBaseUrl
         let client = app.client
 
         return try await withThrowingTaskGroup(of: (Int, ImageGenerationResult).self) { group in
@@ -1214,6 +1223,7 @@ final class EditModel {
                     let result = try await client.imageEdit(
                         sub, outDir: outDir,
                         outPrefix: "\(basePrefix)-\(index + 1)",
+                        baseUrl: baseUrl,
                         apiKey: apiKey,
                         pollInterval: pollInterval,
                         timeoutSeconds: timeoutSeconds,
@@ -1333,7 +1343,8 @@ final class VideoModel {
         let started = Date()
         do {
             let out = try await app.client.videoGenerate(
-                req, outPath: outPath, apiKey: app.bailianSecret,
+                req, outPath: outPath, baseUrl: app.bailianBaseUrl,
+                apiKey: app.bailianSecret,
                 pollInterval: max(3, settings.pollInterval),
                 timeoutSeconds: settings.requestTimeout,
                 onProgress: { [weak self] line in
@@ -1705,7 +1716,7 @@ final class ChatModel {
 
         let started = Date()
         do {
-            let completion = try await app.client.textChat(req, apiKey: app.bailianSecret)
+            let completion = try await app.client.textChat(req, baseUrl: app.bailianBaseUrl, apiKey: app.bailianSecret)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             var reply = ChatMessage(role: .assistant, content: completion.content,
                                     model: completion.model)

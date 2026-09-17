@@ -46,7 +46,7 @@ enum SmokeTest {
             do {
                 var req = ChatRequest(message: "ping")
                 req.maxTokens = 1
-                let completion = try await app.client.textChat(req, apiKey: nil, timeoutSeconds: 60)
+                let completion = try await app.client.textChat(req, baseUrl: app.bailianBaseUrl, apiKey: nil, timeoutSeconds: 60)
                 check("bl chat ping (default profile)", true, completion.model ?? "ok")
             } catch {
                 check("bl chat ping (default profile)", false, error.localizedDescription)
@@ -88,7 +88,7 @@ enum SmokeTest {
                 do {
                     var req = ChatRequest(message: "ping")
                     req.maxTokens = 1
-                    let completion = try await app.client.textChat(req, apiKey: secret, timeoutSeconds: 60)
+                    let completion = try await app.client.textChat(req, baseUrl: app.bailianBaseUrl, apiKey: secret, timeoutSeconds: 60)
                     check(label, true, completion.model ?? "ok")
                 } catch { check(label, false, error.localizedDescription) }
 

@@ -9,6 +9,7 @@ extension BLClient {
         _ req: ImageGenRequest,
         outDir: URL,
         outPrefix: String,
+        baseUrl: String?,
         apiKey: String?,
         pollInterval: Int = 3,
         timeoutSeconds: Int = 900,
@@ -22,6 +23,7 @@ extension BLClient {
                  "--poll-interval", String(pollInterval),
                  "--timeout", String(timeoutSeconds)]
         if let apiKey, !apiKey.isEmpty { args += ["--api-key", apiKey] }
+        if let baseUrl, !baseUrl.isEmpty { args += ["--base-url", baseUrl] }
         return try await runJSON(ImageGenerationResult.self, arguments: args,
                                  timeoutSeconds: timeoutSeconds + 60, onStderrLine: onProgress)
     }
@@ -30,6 +32,7 @@ extension BLClient {
         _ req: ImageEditRequest,
         outDir: URL,
         outPrefix: String,
+        baseUrl: String?,
         apiKey: String?,
         pollInterval: Int = 3,
         timeoutSeconds: Int = 900,
@@ -46,6 +49,7 @@ extension BLClient {
                  "--poll-interval", String(pollInterval),
                  "--timeout", String(timeoutSeconds)]
         if let apiKey, !apiKey.isEmpty { args += ["--api-key", apiKey] }
+        if let baseUrl, !baseUrl.isEmpty { args += ["--base-url", baseUrl] }
         return try await runJSON(ImageGenerationResult.self, arguments: args,
                                  timeoutSeconds: timeoutSeconds + 60, onStderrLine: onProgress)
     }
@@ -59,6 +63,7 @@ extension BLClient {
     func videoGenerate(
         _ req: VideoGenRequest,
         outPath: URL,
+        baseUrl: String?,
         apiKey: String?,
         pollInterval: Int = 5,
         timeoutSeconds: Int = 900,
@@ -79,6 +84,7 @@ extension BLClient {
                  "--timeout", String(timeoutSeconds),
                  "--output", "json"]
         if let apiKey, !apiKey.isEmpty { args += ["--api-key", apiKey] }
+        if let baseUrl, !baseUrl.isEmpty { args += ["--base-url", baseUrl] }
         let out = try await run(arguments: args, timeoutSeconds: timeoutSeconds + 60,
                                 onStderrLine: onProgress)
         guard out.exitCode == 0 else {
@@ -109,6 +115,7 @@ extension BLClient {
 
     func textChat(
         _ req: ChatRequest,
+        baseUrl: String?,
         apiKey: String?,
         timeoutSeconds: Int = 300
     ) async throws -> ChatCompletion {
@@ -118,6 +125,7 @@ extension BLClient {
         if let maxTokens = req.maxTokens { args += ["--max-tokens", String(maxTokens)] }
         if let t = req.temperature { args += ["--temperature", String(t)] }
         if let apiKey, !apiKey.isEmpty { args += ["--api-key", apiKey] }
+        if let baseUrl, !baseUrl.isEmpty { args += ["--base-url", baseUrl] }
         args += ["--timeout", String(timeoutSeconds)]
         return try await runJSON(ChatCompletion.self, arguments: args,
                                  timeoutSeconds: timeoutSeconds + 30)
@@ -129,6 +137,7 @@ extension BLClient {
         imagePath: String,
         prompt: String?,
         model: String?,
+        baseUrl: String?,
         apiKey: String?,
         timeoutSeconds: Int = 180
     ) async throws -> String {
@@ -136,6 +145,7 @@ extension BLClient {
         if let prompt, !prompt.isEmpty { args += ["--prompt", prompt] }
         if let model, !model.isEmpty { args += ["--model", model] }
         if let apiKey, !apiKey.isEmpty { args += ["--api-key", apiKey] }
+        if let baseUrl, !baseUrl.isEmpty { args += ["--base-url", baseUrl] }
         let out = try await run(arguments: args, timeoutSeconds: timeoutSeconds)
         guard out.exitCode == 0 else {
             if let decoded = try? Self.decode(BLErrorEnvelope.self, from: out) {

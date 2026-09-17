@@ -111,20 +111,22 @@ final class BLClient: @unchecked Sendable {
     /// (`IG` = image generation, `TG` = text generation, …). Pages through
     /// `--page-size 50` until all items have been collected. Requires a
     /// logged-in `bl` profile. Returns the ids in the order `bl` reported.
-    func listModels(capability: String, timeoutSeconds: Int = 60) async throws -> [String] {
+    func listModels(capability: String, baseUrl: String? = nil, timeoutSeconds: Int = 60) async throws -> [String] {
         var ids: [String] = []
         var seen = Set<String>()
         var page = 1
         let pageSize = 50
         var total: Int? = nil
         while true {
-            let out = try await run(arguments: [
+            var args = [
                 "model", "list",
                 "--capability", capability,
                 "--page", String(page),
                 "--page-size", String(pageSize),
                 "--quiet",
-            ], timeoutSeconds: timeoutSeconds)
+            ]
+            if let baseUrl, !baseUrl.isEmpty { args += ["--base-url", baseUrl] }
+            let out = try await run(arguments: args, timeoutSeconds: timeoutSeconds)
             guard let data = BLJSON.extract(out.stdout) else {
                 throw BLClientError.badOutput("bl model list returned no JSON (exit \(out.exitCode))")
             }
