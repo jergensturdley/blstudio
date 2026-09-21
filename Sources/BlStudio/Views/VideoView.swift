@@ -107,7 +107,7 @@ struct VideoView: View {
                                         .textFieldStyle(.roundedBorder)
                                         .frame(maxWidth: 300)
                                 }
-                                Text("Bailian image-to-video needs a publicly reachable image URL.")
+                                Text("Bailian image-to-video needs a publicly reachable image URL. With happyhorse-1.1-r2v the image is used as the video's reference frame.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }

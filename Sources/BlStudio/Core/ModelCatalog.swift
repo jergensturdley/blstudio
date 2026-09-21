@@ -2,8 +2,10 @@ import Foundation
 
 enum ModelCatalog {
     static let imageModels = [
+        "qwen-image-3.0-pro",
         "qwen-image-3.0",
         "qwen-image-2.0-pro",
+        "wan2.7-image-pro",
         "wan2.7-image",
         "wan2.6-t2i",
         "z-image-turbo",
@@ -11,8 +13,10 @@ enum ModelCatalog {
     ]
 
     static let editModels = [
+        "qwen-image-3.0-pro",
         "qwen-image-3.0",
         "qwen-image-2.0-pro",
+        "wan2.7-image-pro",
         "wan2.7-image",
         "wan2.5-i2i-preview",
         "wanx2.1-imageedit",
@@ -48,9 +52,13 @@ enum ModelCatalog {
         "wan2.6-t2v",
     ]
 
-    /// Bailian image-to-video models.
+    /// Bailian image-to-video models. `happyhorse-1.1-r2v` is reference-to-video:
+    /// it takes reference images through the same `--image` input as i2v
+    /// (serialized as `first_frame` media), so the app treats it as an i2v-mode
+    /// model.
     static let videoI2VModelsBailian = [
         "happyhorse-1.1-i2v",
+        "happyhorse-1.1-r2v",
     ]
 
     static let videoResolutionsBailian = ["1080P", "720P"]
