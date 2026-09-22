@@ -342,7 +342,7 @@ enum SelfTest {
     static func runViewProbe() -> Int32 {
         var fails = 0
         let state = AppState()
-        let named: [(String, AnyView)] = [
+        var named: [(String, AnyView)] = [
             ("GenerateView", AnyView(GenerateView().environment(state))),
             ("EditView", AnyView(EditView().environment(state))),
             ("VideoView", AnyView(VideoView().environment(state))),
@@ -355,6 +355,12 @@ enum SelfTest {
             ("SettingsView", AnyView(SettingsView().environment(state))),
             ("RootView", AnyView(RootView().environment(state))),
         ]
+        // Probe the real video player card too: prefer a real file from user
+        // history, fall back to a dummy path (metadata init still runs).
+        let vidPath = state.history.entries
+            .first(where: { $0.kind == .videoGenerate && !$0.savedPaths.isEmpty })?.savedPaths.first
+            ?? "/nonexistent/probe.mp4"
+        named.append(("VideoPlayerCard", AnyView(VideoPlayerCard(path: vidPath))))
         for (name, view) in named {
             let renderer = ImageRenderer(content: view.frame(width: 1120, height: 720))
             renderer.scale = 1.0

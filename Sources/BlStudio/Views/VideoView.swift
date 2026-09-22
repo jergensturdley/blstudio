@@ -333,7 +333,7 @@ struct VideoPlayerCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let player {
-                VideoPlayer(player: player)
+                InlineAVPlayerView(player: player)
                     .frame(maxWidth: .infinity)
                     .frame(height: 320)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -371,6 +371,25 @@ struct VideoPlayerCard: View {
             player?.pause()
             player = nil
         }
+    }
+}
+
+/// AVKit's AppKit player wrapped in a representable. Deliberately not SwiftUI's
+/// `VideoPlayer`: its `_AVKit_SwiftUI` overlay aborts on macOS 27.2 seed builds
+/// (getSuperclassMetadata fails on 'So12AVPlayerViewC') whenever the view
+/// materializes. AVPlayerView is plain ObjC-backed AVKit and does not hit that.
+private struct InlineAVPlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .inline
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if view.player !== player { view.player = player }
     }
 }
 
