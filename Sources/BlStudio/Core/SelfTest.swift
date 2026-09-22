@@ -98,6 +98,19 @@ enum SelfTest {
         do { _ = try parseSeed(enabled: true, text: "  ") } catch { emptySeedRejected = true }
         check("seed validation rejects empty", emptySeedRejected)
 
+        // 7b-2. Model catalog coverage for newer Bailian models
+        check("catalog has pro image models",
+              ModelCatalog.imageModels.contains("qwen-image-3.0-pro")
+              && ModelCatalog.imageModels.contains("wan2.7-image-pro")
+              && ModelCatalog.editModels.contains("qwen-image-3.0-pro")
+              && ModelCatalog.editModels.contains("wan2.7-image-pro"))
+        check("catalog has r2v in i2v list",
+              ModelCatalog.videoI2VModelsBailian.contains("happyhorse-1.1-r2v")
+              && ModelCatalog.videoT2VModelsBailian.contains("happyhorse-1.1-t2v")
+              && !ModelCatalog.videoT2VModelsBailian.contains("happyhorse-1.1-r2v"))
+        let i2vFirst = ModelCatalog.videoI2VModelsBailian.first
+        check("i2v picker defaults stay stable", i2vFirst == "happyhorse-1.1-i2v")
+
         // 7c. MiniMax response decoding
         let mmOK = """
         {"base_resp":{"status_code":0,"status_msg":"success"},
@@ -329,7 +342,7 @@ enum SelfTest {
     static func runViewProbe() -> Int32 {
         var fails = 0
         let state = AppState()
-        let named: [(String, AnyView)] = [
+        var named: [(String, AnyView)] = [
             ("GenerateView", AnyView(GenerateView().environment(state))),
             ("EditView", AnyView(EditView().environment(state))),
             ("VideoView", AnyView(VideoView().environment(state))),
@@ -342,6 +355,12 @@ enum SelfTest {
             ("SettingsView", AnyView(SettingsView().environment(state))),
             ("RootView", AnyView(RootView().environment(state))),
         ]
+        // Probe the real video player card too: prefer a real file from user
+        // history, fall back to a dummy path (metadata init still runs).
+        let vidPath = state.history.entries
+            .first(where: { $0.kind == .videoGenerate && !$0.savedPaths.isEmpty })?.savedPaths.first
+            ?? "/nonexistent/probe.mp4"
+        named.append(("VideoPlayerCard", AnyView(VideoPlayerCard(path: vidPath))))
         for (name, view) in named {
             let renderer = ImageRenderer(content: view.frame(width: 1120, height: 720))
             renderer.scale = 1.0
